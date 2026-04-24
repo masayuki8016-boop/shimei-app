@@ -336,6 +336,8 @@
             if(!sub) return;
             safeSetText('header-title', sub.name);
             safeSetText('display', sub.lastPicked || "？");
+            const display = document.getElementById('display');
+            if(display) display.classList.remove('winner-pop'); // 画面を開いた時にエフェクトをリセット
             renderStudents(); updateUI(); showView('play');
         }
 
@@ -383,21 +385,38 @@
                 if(!display || remaining.length === 0) return;
 
                 isSpinning = true;
-                display.classList.add('doki-doki');
+                display.classList.remove('winner-pop'); // 過去のエフェクトをリセット
+                display.classList.add('doki-doki'); // 脈打ち開始
+                
                 let count = 0;
-                const spin = setInterval(() => {
+                let delay = 40; // 初速
+                const maxCount = 30; // 合計の回転数
+                
+                const spin = () => {
                     display.innerText = sub.students[Math.floor(Math.random() * sub.students.length)];
-                    if(++count > 25) {
-                        clearInterval(spin);
+                    count++;
+                    
+                    if(count < maxCount) {
+                        // 徐々に遅くして焦らす演出
+                        if (count > 18) delay += 20;
+                        if (count > 25) delay += 60;
+                        setTimeout(spin, delay);
+                    } else {
+                        // 決定！
                         display.classList.remove('doki-doki');
                         const picked = remaining[Math.floor(Math.random() * remaining.length)];
                         sub.called.push(picked); sub.lastPicked = picked; sub.updatedAt = Date.now();
-                        display.innerText = picked; display.classList.add('winner-pop');
+                        
+                        display.innerText = picked; 
+                        void display.offsetWidth; // アニメーションを確実に再発動させるための魔法のコード
+                        display.classList.add('winner-pop'); // ドーン！と登場
+                        
                         saveSubject(sub);
                         isSpinning = false;
-                        if(sub.called.length === sub.students.length) setTimeout(() => safeDisplay('view-complete', 'flex'), 1000);
+                        if(sub.called.length === sub.students.length) setTimeout(() => safeDisplay('view-complete', 'flex'), 1500);
                     }
-                }, 50);
+                };
+                spin(); // ルーレット開始
             };
         }
 
