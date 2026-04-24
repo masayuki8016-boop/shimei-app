@@ -275,7 +275,7 @@
         // スキップボタンで強制的に画面を開く
         forceOpenBtn.onclick = () => {
             loadingDiv.style.display = 'none';
-            renderSubjects(); // ローカルデータがあれば描画
+            renderSubjects(); // ローカルデータで描画
         };
 
         try {
@@ -283,10 +283,8 @@
             const auth = getAuth(app);
             const db = getFirestore(app);
 
-            // ※トラブルの元になるIndexedDB（オフライン永続化）のコードは削除して安定させました
-
             let user = null;
-            // ローカルストレージからも読み込めるようにしておく（スキップ時用）
+            // ローカルストレージからも読み込めるようにしておく
             let subjects = JSON.parse(localStorage.getItem('shimei_local_db')) || [];
             let activeId = null;
             let isSpinning = false;
@@ -320,7 +318,7 @@
             signInAnonymously(auth).catch(e => {
                 console.error("Auth Error", e);
                 document.getElementById('loading-spinner').style.display = 'none';
-                forceOpenBtn.style.display = 'block'; // エラー時もスキップボタンを出す
+                forceOpenBtn.style.display = 'block'; 
                 
                 if (e.code === 'auth/configuration-not-found' || e.code === 'auth/admin-restricted-operation') {
                     loadingDiv.innerHTML = `
@@ -341,7 +339,6 @@
                     const snap = await getDocs(q);
                     subjects = [];
                     snap.forEach(doc => { subjects.push(doc.data()); });
-                    // ローカルにもバックアップ
                     localStorage.setItem('shimei_local_db', JSON.stringify(subjects));
                     renderSubjects();
                 } catch (e) { 
@@ -350,25 +347,29 @@
                 }
             }
 
-            async function saveSubject(subject) {
-                // ローカルに即座にバックアップ
+            // 【重要】UIをブロックさせず、裏側でこっそり保存する関数
+            function saveSubject(subject) {
+                // ローカルに即座にバックアップ（これで画面には即反映・絶対消えない）
                 const idx = subjects.findIndex(s => s.id === subject.id);
                 if (idx !== -1) subjects[idx] = subject; else subjects.push(subject);
                 localStorage.setItem('shimei_local_db', JSON.stringify(subjects));
 
-                if (!user) return; // スキップ時はここまで
+                if (!user) return; 
                 
                 const indicator = document.getElementById('sync-indicator');
                 indicator.style.display = 'inline-block';
                 indicator.innerText = "☁️ 保存中...";
-                try {
-                    await setDoc(doc(getSubjectsRef(), subject.id), subject);
-                    indicator.innerText = "☁️ 保存完了";
-                    setTimeout(() => indicator.style.display = 'none', 1200);
-                } catch (e) { 
-                    console.error("Save error", e);
-                    indicator.innerText = "⚠️ 保存エラー（ルール未設定など）";
-                }
+                
+                // awaitを使わず、裏で非同期に処理させる
+                setDoc(doc(getSubjectsRef(), subject.id), subject)
+                    .then(() => {
+                        indicator.innerText = "☁️ 保存完了";
+                        setTimeout(() => indicator.style.display = 'none', 1200);
+                    })
+                    .catch((e) => {
+                        console.error("Save error", e);
+                        indicator.innerText = "⚠️ オフライン保存";
+                    });
             }
 
             function renderSubjects() {
@@ -386,11 +387,14 @@
                     `;
                     div.onclick = (e) => {
                         if (e.target.classList.contains('delete-icon')) {
-                            showConfirm("授業の削除", `「${sub.name}」を完全に削除しますか？`, async () => {
+                            showConfirm("授業の削除", `「${sub.name}」を完全に削除しますか？`, () => {
+                                // 【UIを最優先で更新して画面から消す】
                                 subjects = subjects.filter(s => s.id !== sub.id);
                                 localStorage.setItem('shimei_local_db', JSON.stringify(subjects));
-                                if (user) await deleteDoc(doc(getSubjectsRef(), sub.id));
-                                renderSubjects();
+                                renderSubjects(); 
+                                
+                                // そのあと裏でサーバーから削除
+                                if (user) deleteDoc(doc(getSubjectsRef(), sub.id)).catch(err => console.error(err));
                             });
                         } else {
                             selectSubject(sub.id);
@@ -400,16 +404,28 @@
                 });
             }
 
-            document.getElementById('btn-add-subject').onclick = async () => {
-                const name = document.getElementById('input-new-subject').value.trim();
+            document.getElementById('btn-add-subject').onclick = function() {
+                const nameInput = document.getElementById('input-new-subject');
+                const name = nameInput.value.trim();
                 if (!name) return;
+                
+                this.disabled = true;
+                const originalText = this.innerText;
+                this.innerText = "作成中...";
+                
                 const newId = generateId();
                 const newSub = { id: newId, name, students: [], called: [], lastPicked: null, start: 1, end: 30, updatedAt: Date.now() };
                 subjects.push(newSub);
-                await saveSubject(newSub);
-                document.getElementById('input-new-subject').value = '';
+                
+                // 【UIを最優先で更新して次の画面へ】
+                nameInput.value = '';
+                this.innerText = originalText;
+                this.disabled = false;
                 renderSubjects();
                 selectSubject(newId);
+                
+                // そのあと裏で保存
+                saveSubject(newSub);
             };
 
             function selectSubject(id) {
@@ -423,7 +439,7 @@
                 }
             }
 
-            document.getElementById('btn-config-done').onclick = async () => {
+            document.getElementById('btn-config-done').onclick = () => {
                 const start = parseInt(document.getElementById('input-start').value);
                 const end = parseInt(document.getElementById('input-end').value);
                 const sub = subjects.find(s => s.id === activeId);
@@ -433,8 +449,10 @@
                 sub.students = Array.from({length: end - start + 1}, (_, i) => i + start);
                 sub.called = [];
                 sub.updatedAt = Date.now();
-                await saveSubject(sub);
+                
+                // 【UI最優先】
                 initPlayView();
+                saveSubject(sub);
             };
 
             function initPlayView() {
@@ -455,7 +473,7 @@
                     const isCalled = sub.called.includes(num);
                     div.className = `student-chip ${isCalled ? 'called' : ''}`;
                     div.innerText = num;
-                    div.onclick = async () => {
+                    div.onclick = () => {
                         if (isCalled) {
                             sub.called = sub.called.filter(n => n !== num);
                             if (sub.lastPicked === num) {
@@ -468,9 +486,11 @@
                             document.getElementById('display').innerText = num;
                         }
                         sub.updatedAt = Date.now();
+                        
+                        // 【UI最優先】
                         renderStudents();
                         updateUI();
-                        await saveSubject(sub);
+                        saveSubject(sub);
                     };
                     grid.appendChild(div);
                 });
@@ -496,7 +516,7 @@
                 isSpinning = true;
                 let ticks = 0;
                 const display = document.getElementById('display');
-                const timer = setInterval(async () => {
+                const timer = setInterval(() => {
                     display.innerText = sub.students[Math.floor(Math.random() * sub.students.length)];
                     if (++ticks > 15) {
                         clearInterval(timer);
@@ -504,14 +524,18 @@
                         sub.called.push(picked);
                         sub.lastPicked = picked;
                         sub.updatedAt = Date.now();
+                        
                         display.innerText = picked;
                         display.style.animation = 'none';
                         display.offsetHeight; 
                         display.style.animation = 'pop 0.6s ease-out forwards';
+                        
+                        // 【UI最優先】
                         renderStudents();
                         updateUI();
-                        await saveSubject(sub);
+                        saveSubject(sub);
                         isSpinning = false;
+                        
                         if (sub.called.length === sub.students.length) {
                             setTimeout(() => document.getElementById('view-complete').classList.add('active'), 1000);
                         }
@@ -526,13 +550,15 @@
             };
 
             document.getElementById('btn-reset-subject').onclick = () => {
-                showConfirm("リセット", "この授業の指名状況をすべてリセットしますか？", async () => {
+                showConfirm("リセット", "この授業の指名状況をすべてリセットしますか？", () => {
                     const sub = subjects.find(s => s.id === activeId);
                     sub.called = [];
                     sub.lastPicked = null;
                     sub.updatedAt = Date.now();
-                    await saveSubject(sub);
+                    
+                    // 【UI最優先】
                     initPlayView();
+                    saveSubject(sub);
                 });
             };
 
