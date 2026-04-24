@@ -105,6 +105,8 @@
         .overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); z-index: 100; display: none; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(5px); }
         .overlay.active { display: flex; }
         
+        #view-complete { color: white; flex-direction: column; text-align: center; }
+
         #loading { position: fixed; inset: 0; background: white; z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center; }
         .spinner { border: 5px solid #f3f3f3; border-top: 5px solid var(--primary); border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin-bottom: 20px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -113,9 +115,10 @@
 <body>
 
     <div id="loading">
-        <div class="spinner"></div>
+        <div id="loading-spinner" class="spinner"></div>
         <p id="loading-text" style="font-weight: bold; color: var(--text-muted);">接続を確認中...</p>
         <button id="btn-login-google" class="btn-accent" style="display:none; width: auto; padding: 15px 30px; font-size: 1.2rem;">Googleでログイン</button>
+        <p id="error-hint" style="display:none; color: var(--danger); font-size: 0.8rem; margin-top: 15px;"></p>
     </div>
 
     <header>
@@ -192,25 +195,49 @@
         const provider = new GoogleAuthProvider();
 
         let user = null, subjects = [], activeId = null, unsubscribe = null;
+        let isAuthenticating = true; // ログイン処理中フラグ
 
-        document.getElementById('btn-login-google').onclick = () => signInWithRedirect(auth, provider);
-        document.getElementById('btn-logout').onclick = () => { if(confirm("ログアウトしますか？")) signOut(auth).then(() => location.reload()); };
+        document.getElementById('btn-login-google').onclick = () => {
+            isAuthenticating = true;
+            signInWithRedirect(auth, provider);
+        };
 
+        document.getElementById('btn-logout').onclick = () => { 
+            if(confirm("ログアウトしますか？")) signOut(auth).then(() => location.reload()); 
+        };
+
+        // ログイン状態の管理：リダイレクト待ちを優先する
         onAuthStateChanged(auth, async (u) => {
             if (u) {
                 user = u;
+                isAuthenticating = false;
                 document.getElementById('loading').style.display = 'none';
-                await getRedirectResult(auth);
                 startSync();
             } else {
-                document.getElementById('loading-text').innerText = "ログインしてください";
-                document.getElementById('btn-login-google').style.display = 'block';
+                // ユーザーがいない場合、リダイレクトから戻ってきたばかりか確認
+                try {
+                    const result = await getRedirectResult(auth);
+                    if (result && result.user) {
+                        // 成功（onAuthStateChangedが再度呼ばれるのでここでは何もしない）
+                    } else {
+                        // 本当に未ログイン状態
+                        isAuthenticating = false;
+                        document.getElementById('loading-spinner').style.display = 'none';
+                        document.getElementById('loading-text').innerText = "ログインしてください";
+                        document.getElementById('btn-login-google').style.display = 'block';
+                    }
+                } catch (e) {
+                    console.error("Auth Error:", e);
+                    document.getElementById('loading-spinner').style.display = 'none';
+                    document.getElementById('error-hint').style.display = 'block';
+                    document.getElementById('error-hint').innerText = "ログインエラーが発生しました。設定を確認してください。";
+                    document.getElementById('btn-login-google').style.display = 'block';
+                }
             }
         });
 
         function startSync() {
             if (unsubscribe) unsubscribe();
-            // 保存場所をシンプルに固定：/users/{UID}/subjects/{SubjectID}
             const q = query(collection(db, "users", user.uid, "subjects"));
             unsubscribe = onSnapshot(q, (snap) => {
                 subjects = snap.docs.map(doc => doc.data());
@@ -231,6 +258,7 @@
 
         function renderSubjects() {
             const grid = document.getElementById('subject-grid');
+            if(!grid) return;
             grid.innerHTML = '';
             subjects.sort((a,b) => b.updatedAt - a.updatedAt).forEach(sub => {
                 const div = document.createElement('div');
@@ -260,8 +288,13 @@
         };
 
         document.getElementById('btn-config-done').onclick = () => {
-            const start = parseInt(document.getElementById('input-start').value);
-            const end = parseInt(document.getElementById('input-end').value);
+            const startStr = document.getElementById('input-start').value;
+            const endStr = document.getElementById('input-end').value;
+            const start = parseInt(startStr.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)));
+            const end = parseInt(endStr.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)));
+            
+            if(isNaN(start) || isNaN(end) || start > end) return;
+            
             const sub = subjects.find(s => s.id === activeId);
             sub.students = Array.from({length: end - start + 1}, (_, i) => i + start);
             sub.called = []; sub.updatedAt = Date.now();
@@ -278,6 +311,7 @@
         function renderStudents() {
             const sub = subjects.find(s => s.id === activeId);
             const grid = document.getElementById('student-grid');
+            if(!grid || !sub) return;
             grid.innerHTML = '';
             sub.students.forEach(num => {
                 const div = document.createElement('div');
@@ -294,6 +328,7 @@
 
         function updateUI() {
             const sub = subjects.find(s => s.id === activeId);
+            if(!sub) return;
             const remain = sub.students.length - sub.called.length;
             document.getElementById('label-remain').innerText = remain;
             document.getElementById('label-progress').innerText = `${sub.called.length}/${sub.students.length}`;
@@ -302,20 +337,24 @@
         }
 
         document.getElementById('btn-pick').onclick = () => {
+            if(isSpinning) return;
             const sub = subjects.find(s => s.id === activeId);
             const remaining = sub.students.filter(n => !sub.called.includes(n));
             const display = document.getElementById('display');
+            
+            isSpinning = true;
             display.classList.add('doki-doki');
             let count = 0;
             const spin = setInterval(() => {
                 display.innerText = sub.students[Math.floor(Math.random() * sub.students.length)];
-                if(++count > 20) {
+                if(++count > 25) {
                     clearInterval(spin);
                     display.classList.remove('doki-doki');
                     const picked = remaining[Math.floor(Math.random() * remaining.length)];
                     sub.called.push(picked); sub.lastPicked = picked; sub.updatedAt = Date.now();
                     display.innerText = picked; display.classList.add('winner-pop');
                     saveSubject(sub);
+                    isSpinning = false;
                     if(sub.called.length === sub.students.length) setTimeout(() => document.getElementById('view-complete').classList.add('active'), 1000);
                 }
             }, 50);
