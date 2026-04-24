@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>授業用ランダム指名くん</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-light: #eff6ff;
+            --accent: #f97316;
+            --bg: #f8fafc;
+            --white: #ffffff;
+            --text-main: #334155;
+            --text-muted: #94a3b8;
+            --border: #e2e8f0;
+            --danger: #ef4444;
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        header {
+            background-color: var(--primary);
+            color: white;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            z-index: 50;
+        }
+        header h1 { margin: 0; font-size: 1.2rem; }
+        
+        #sync-indicator {
+            font-size: 0.8rem; background: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 20px;
+            display: none; font-weight: bold;
+        }
+
+        main { flex: 1; display: flex; padding: 16px; gap: 16px; overflow: hidden; }
+        @media (max-width: 768px) { main { flex-direction: column; } }
+
+        .card {
+            background: var(--white); border-radius: 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            padding: 24px; display: flex; flex-direction: column;
+        }
+
+        .view { display: none; width: 100%; height: 100%; flex-direction: column; }
+        .view.active { display: flex; }
+
+        .subject-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px;
+            margin-top: 20px; overflow-y: auto; padding-bottom: 20px;
+        }
+        .subject-card {
+            background: white; border: 2px solid var(--border); border-radius: 20px; padding: 20px;
+            cursor: pointer; position: relative; transition: all 0.2s;
+        }
+        .subject-card:active { transform: scale(0.98); }
+        .subject-card h3 { margin: 0 0 8px 0; color: var(--primary); font-size: 1.2rem; }
+        .delete-icon {
+            position: absolute; top: 10px; right: 10px; background: #fee2e2; color: var(--danger);
+            border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 18px;
+            z-index: 5;
+        }
+
+        .picker-container { flex: 1; align-items: center; justify-content: center; text-align: center; overflow: hidden; position: relative; }
+        
+        .number-display { 
+            font-size: min(50vw, 45vh); font-weight: 900; color: var(--primary); 
+            margin: auto 0; line-height: 1; letter-spacing: -3px;
+        }
+        
+        .list-area { width: 340px; flex-shrink: 0; }
+        @media (max-width: 768px) { .list-area { width: 100%; height: 300px; } }
+
+        .student-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+            overflow-y: auto; margin-top: 10px; padding-bottom: 20px;
+        }
+        
+        .student-chip {
+            border: 2px solid var(--primary-light); border-radius: 12px;
+            padding: 12px 4px; text-align: center; font-weight: 900; font-size: 1.1rem;
+            cursor: pointer; transition: all 0.2s; background: white;
+        }
+        .student-chip:active { transform: scale(0.9); }
+        .student-chip.called {
+            background: #f1f5f9; border-color: transparent; opacity: 0.15; text-decoration: line-through;
+        }
+
+        button { border: none; border-radius: 16px; font-weight: bold; cursor: pointer; transition: all 0.2s; }
+        .btn-main { background: var(--primary); color: white; padding: 12px 24px; }
+        .btn-accent { background: var(--accent); color: white; padding: 24px; font-size: 2.2rem; width: 100%; max-width: 360px; margin-bottom: 20px; box-shadow: 0 10px 20px rgba(249, 115, 22, 0.4); }
+        .btn-ghost { background: #f1f5f9; color: #64748b; padding: 12px 20px; font-size: 1rem; }
+        .btn-danger { background: var(--danger); color: white; padding: 12px 24px; }
+
+        input { padding: 16px; border: 2px solid var(--border); border-radius: 16px; font-size: 1.2rem; width: 100%; outline: none; }
+        input:focus { border-color: var(--primary); }
+
+        .progress-bar { height: 12px; background: #f1f5f9; border-radius: 6px; overflow: hidden; margin-top: 8px; }
+        .progress-fill { height: 100%; background: var(--primary); width: 0%; transition: width 0.3s; }
+
+        .overlay {
+            position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); z-index: 100;
+            display: none; align-items: center; justify-content: center; padding: 20px;
+        }
+        .modal {
+            background: white; padding: 40px; border-radius: 32px; width: 100%; max-width: 450px; text-align: center;
+        }
+        .overlay.active { display: flex; }
+        
+        #view-complete { background: rgba(37, 99, 235, 0.98); color: white; flex-direction: column; text-align: center; }
+
+        @keyframes pop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.15); color: var(--accent); }
+            100% { transform: scale(1); }
+        }
+
+        #loading {
+            position: fixed; inset: 0; background: white; z-index: 200;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 20px; text-align: center;
+        }
+        .spinner {
+            border: 6px solid #f3f3f3; border-top: 6px solid var(--primary); border-radius: 50%;
+            width: 50px; height: 50px; animation: spin 1s linear infinite; margin-bottom: 20px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .error-card {
+            background: #fff1f2; border: 2px solid #f43f5e; padding: 24px; border-radius: 20px;
+            text-align: left; max-width: 550px; line-height: 1.8;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="loading">
+        <div id="loading-spinner" class="spinner"></div>
+        <p id="loading-text" style="color: var(--text-muted); font-weight: bold; font-size: 1.2rem;">クラウドと同期中...</p>
+        <button id="btn-force-open" class="btn-ghost" style="display:none; margin-top: 20px;">同期をスキップして開く</button>
+    </div>
+
+    <!-- 確認ダイアログ -->
+    <div id="modal-confirm" class="overlay">
+        <div class="modal">
+            <h3 id="confirm-title" style="font-size: 1.5rem; margin-bottom: 10px;">確認</h3>
+            <p id="confirm-msg" style="color: var(--text-muted); margin-bottom: 30px; font-size: 1.1rem;">本当によろしいですか？</p>
+            <div style="display: flex; gap: 16px;">
+                <button id="confirm-cancel" class="btn-ghost" style="flex: 1;">戻る</button>
+                <button id="confirm-ok" class="btn-danger" style="flex: 1;">実行</button>
+            </div>
+        </div>
+    </div>
+
+    <header>
+        <div style="display: flex; align-items: center; gap: 15px;">
+            <h1>🎓 指名くん</h1>
+            <span id="sync-indicator">☁️ 保存完了</span>
+        </div>
+        <button id="btn-to-list" class="btn-main" style="background: rgba(255,255,255,0.2); display: none;">授業一覧へ</button>
+    </header>
+
+    <main>
+        <!-- 授業一覧画面 -->
+        <div id="view-list" class="view active">
+            <h2 style="font-size: 1.8rem; margin-bottom: 20px;">どの授業を始めますか？</h2>
+            <div style="background: white; padding: 30px; border-radius: 24px; border: 2px dashed var(--border); margin-bottom: 24px;">
+                <p style="margin: 0 0 15px 0; font-weight: bold; font-size: 1.1rem;">新しい授業を追加</p>
+                <div style="display: flex; gap: 15px;">
+                    <input type="text" id="input-new-subject" placeholder="例：5-1 理科演習">
+                    <button id="btn-add-subject" class="btn-main" style="white-space: nowrap; font-size: 1.1rem;">作成</button>
+                </div>
+            </div>
+            <div id="subject-grid" class="subject-grid"></div>
+        </div>
+
+        <!-- 初期設定画面 -->
+        <div id="view-config" class="view card" style="align-items: center; justify-content: center;">
+            <h2 id="config-subject-name" style="font-size: 2.2rem; margin-bottom: 10px; color: var(--primary);">授業名</h2>
+            <p class="text-muted" style="font-size: 1.2rem;">出席番号の範囲を設定してください</p>
+            <div style="display: flex; align-items: center; gap: 15px; margin: 50px 0;">
+                <input type="number" id="input-start" value="1" style="width: 140px; text-align: center; font-size: 2.5rem; font-weight: bold;">
+                <span style="font-size: 3rem; color: var(--border);">〜</span>
+                <input type="number" id="input-end" value="30" style="width: 140px; text-align: center; font-size: 2.5rem; font-weight: bold;">
+            </div>
+            <button id="btn-config-done" class="btn-accent">この範囲で指名を開始！</button>
+        </div>
+
+        <!-- 抽選メイン画面 -->
+        <div id="view-play" class="view" style="flex-direction: row; gap: 16px;">
+            <div class="card picker-container">
+                <div style="background: var(--primary-light); color: var(--primary); padding: 10px 24px; border-radius: 30px; font-weight: bold; margin-bottom: 15px; font-size: 1.1rem;">
+                    未指名：残り <span id="label-remain" style="font-size: 1.3rem;">0</span> 名
+                </div>
+                <!-- 巨大番号 -->
+                <div id="display" class="number-display">？</div>
+                
+                <button id="btn-pick" class="btn-accent">次の人を指名！</button>
+                <button id="btn-reset-subject" class="btn-ghost" style="margin-bottom: 10px;">この授業の記録をリセット</button>
+            </div>
+
+            <div class="card list-area">
+                <h3 style="margin: 0 0 10px 0; font-size: 1.2rem;">📋 指名状況 <span style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted); display: block;">（番号タップで指名済み/未指名を切替）</span></h3>
+                <div id="student-grid" class="student-grid"></div>
+                <div style="margin-top: auto; padding-top: 15px; border-top: 2px solid var(--border);">
+                    <div style="display: flex; justify-content: space-between; font-size: 1rem; margin-bottom: 6px; font-weight: bold;">
+                        <span>授業の進捗</span>
+                        <span id="label-progress">0 / 0</span>
+                    </div>
+                    <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 全員完了オーバーレイ -->
+    <div id="view-complete" class="overlay">
+        <div style="font-size: 10rem; margin-bottom: 20px;">🎊</div>
+        <h2 style="font-size: 3.5rem; margin-bottom: 10px;">全員指名完了！</h2>
+        <p style="font-size: 1.5rem; margin-bottom: 40px; opacity: 0.9;">お疲れ様でした。</p>
+        <button id="btn-restart" class="btn-accent" style="background: white; color: var(--primary); margin-top: 0;">もう一度最初から</button>
+        <button id="btn-complete-back" class="btn-ghost" style="margin-top: 20px; background: none; color: white; border: 2px solid white;">授業一覧に戻る</button>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, collection, getDocs, deleteDoc, query, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- 設定値の埋め込み ---
+        const myFirebaseConfig = {
+            apiKey: "AIzaSyBdtWlwEzrJM6P2ic0sJFkrm4WkPYEPgUQ",
+            authDomain: "my-shimei.firebaseapp.com",
+            projectId: "my-shimei",
+            storageBucket: "my-shimei.firebasestorage.app",
+            messagingSenderId: "729865983172",
+            appId: "1:729865983172:web:12d79c9de229a6ba7e6591"
+        };
+
+        // 安全なID生成関数（crypto.randomUUIDの代わり）
+        const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
+
+        // UI要素
+        const loadingDiv = document.getElementById('loading');
+        const loadingText = document.getElementById('loading-text');
+        const forceOpenBtn = document.getElementById('btn-force-open');
+
+        // タイムアウト設定：10秒経っても開かない場合はボタンを出す
+        setTimeout(() => {
+            if (loadingDiv.style.display !== 'none') {
+                loadingText.innerText = "同期が遅れています。オフラインの可能性があります。";
+                forceOpenBtn.style.display = 'block';
+            }
+        }, 10000);
+
+        forceOpenBtn.onclick = () => loadingDiv.style.display = 'none';
+
+        try {
+            const app = initializeApp(myFirebaseConfig);
+            const auth = getAuth(app);
+            const db = getFirestore(app);
+
+            // オフライン対応（iPadの実習棟などで便利）
+            enableIndexedDbPersistence(db).catch((err) => {
+                console.warn("Offline persistence not enabled:", err.code);
+            });
+
+            let user = null;
+            let subjects = [];
+            let activeId = null;
+            let isSpinning = false;
+            let confirmAction = null;
+
+            const modal = document.getElementById('modal-confirm');
+            const showConfirm = (title, msg, onOk) => {
+                document.getElementById('confirm-title').innerText = title;
+                document.getElementById('confirm-msg').innerText = msg;
+                confirmAction = onOk;
+                modal.classList.add('active');
+            };
+            document.getElementById('confirm-cancel').onclick = () => modal.classList.remove('active');
+            document.getElementById('confirm-ok').onclick = () => {
+                if(confirmAction) confirmAction();
+                modal.classList.remove('active');
+            };
+
+            const getSubjectsRef = () => collection(db, 'users', user.uid, 'subjects');
+
+            onAuthStateChanged(auth, async (u) => {
+                if (u) {
+                    user = u;
+                    await fetchSubjects();
+                    loadingDiv.style.display = 'none';
+                }
+            });
+            
+            signInAnonymously(auth).catch(e => {
+                console.error("Auth Error", e);
+                document.getElementById('loading-spinner').style.display = 'none';
+                if (e.code === 'auth/configuration-not-found' || e.code === 'auth/admin-restricted-operation') {
+                    loadingDiv.innerHTML = `
+                        <div class="error-card">
+                            <h3>⚠️ 認証エラー</h3>
+                            <p>Firebaseの「匿名ログイン」が無効です。Authenticationの設定を確認してください。</p>
+                            <button onclick="location.reload()" class="btn-main" style="width:100%; margin-top:20px">再読み込み</button>
+                        </div>
+                    `;
+                } else {
+                    loadingText.innerHTML = `接続エラー: ${e.message}<br>ブラウザで開き直してください。`;
+                }
+            });
+
+            async function fetchSubjects() {
+                try {
+                    const q = query(getSubjectsRef());
+                    const snap = await getDocs(q);
+                    subjects = [];
+                    snap.forEach(doc => { subjects.push(doc.data()); });
+                    renderSubjects();
+                } catch (e) { console.error("Fetch error", e); }
+            }
+
+            async function saveSubject(subject) {
+                if (!user) return;
+                const indicator = document.getElementById('sync-indicator');
+                indicator.style.display = 'inline-block';
+                try {
+                    await setDoc(doc(getSubjectsRef(), subject.id), subject);
+                    setTimeout(() => indicator.style.display = 'none', 1200);
+                } catch (e) { console.error("Save error", e); }
+            }
+
+            function renderSubjects() {
+                const grid = document.getElementById('subject-grid');
+                grid.innerHTML = '';
+                subjects.sort((a, b) => b.updatedAt - a.updatedAt).forEach(sub => {
+                    const div = document.createElement('div');
+                    div.className = 'subject-card';
+                    const progress = sub.students.length > 0 ? Math.round((sub.called.length / sub.students.length) * 100) : 0;
+                    div.innerHTML = `
+                        <div class="delete-icon">×</div>
+                        <h3>${sub.name}</h3>
+                        <p style="color: var(--text-muted); margin:0; font-size:0.9rem;">${sub.students.length}名中 ${sub.called.length}名済み</p>
+                        <div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>
+                    `;
+                    div.onclick = (e) => {
+                        if (e.target.classList.contains('delete-icon')) {
+                            showConfirm("授業の削除", `「${sub.name}」を完全に削除しますか？`, async () => {
+                                subjects = subjects.filter(s => s.id !== sub.id);
+                                await deleteDoc(doc(getSubjectsRef(), sub.id));
+                                renderSubjects();
+                            });
+                        } else {
+                            selectSubject(sub.id);
+                        }
+                    };
+                    grid.appendChild(div);
+                });
+            }
+
+            document.getElementById('btn-add-subject').onclick = async () => {
+                const name = document.getElementById('input-new-subject').value.trim();
+                if (!name) return;
+                const newId = generateId();
+                const newSub = { id: newId, name, students: [], called: [], lastPicked: null, start: 1, end: 30, updatedAt: Date.now() };
+                subjects.push(newSub);
+                await saveSubject(newSub);
+                document.getElementById('input-new-subject').value = '';
+                renderSubjects();
+                selectSubject(newId);
+            };
+
+            function selectSubject(id) {
+                activeId = id;
+                const sub = subjects.find(s => s.id === id);
+                if (sub.students.length === 0) {
+                    document.getElementById('config-subject-name').innerText = sub.name;
+                    showView('config');
+                } else {
+                    initPlayView();
+                }
+            }
+
+            document.getElementById('btn-config-done').onclick = async () => {
+                const start = parseInt(document.getElementById('input-start').value);
+                const end = parseInt(document.getElementById('input-end').value);
+                const sub = subjects.find(s => s.id === activeId);
+                if (isNaN(start) || isNaN(end) || start > end) return;
+                sub.start = start;
+                sub.end = end;
+                sub.students = Array.from({length: end - start + 1}, (_, i) => i + start);
+                sub.called = [];
+                sub.updatedAt = Date.now();
+                await saveSubject(sub);
+                initPlayView();
+            };
+
+            function initPlayView() {
+                const sub = subjects.find(s => s.id === activeId);
+                document.getElementById('header-title').innerText = sub.name;
+                document.getElementById('display').innerText = sub.lastPicked || "？";
+                renderStudents();
+                updateUI();
+                showView('play');
+            }
+
+            function renderStudents() {
+                const sub = subjects.find(s => s.id === activeId);
+                const grid = document.getElementById('student-grid');
+                grid.innerHTML = '';
+                sub.students.forEach(num => {
+                    const div = document.createElement('div');
+                    const isCalled = sub.called.includes(num);
+                    div.className = `student-chip ${isCalled ? 'called' : ''}`;
+                    div.innerText = num;
+                    div.onclick = async () => {
+                        if (isCalled) {
+                            sub.called = sub.called.filter(n => n !== num);
+                            if (sub.lastPicked === num) {
+                                sub.lastPicked = null;
+                                document.getElementById('display').innerText = "？";
+                            }
+                        } else {
+                            sub.called.push(num);
+                            sub.lastPicked = num;
+                            document.getElementById('display').innerText = num;
+                        }
+                        sub.updatedAt = Date.now();
+                        renderStudents();
+                        updateUI();
+                        await saveSubject(sub);
+                    };
+                    grid.appendChild(div);
+                });
+            }
+
+            function updateUI() {
+                const sub = subjects.find(s => s.id === activeId);
+                const remain = sub.students.length - sub.called.length;
+                document.getElementById('label-remain').innerText = remain;
+                document.getElementById('label-progress').innerText = `${sub.called.length} / ${sub.students.length}`;
+                const percent = (sub.called.length / sub.students.length) * 100;
+                document.getElementById('progress-fill').style.width = percent + '%';
+                document.getElementById('btn-pick').disabled = (remain === 0);
+                document.getElementById('btn-pick').style.opacity = (remain === 0) ? "0.4" : "1";
+            }
+
+            document.getElementById('btn-pick').onclick = () => {
+                if (isSpinning) return;
+                const sub = subjects.find(s => s.id === activeId);
+                const remaining = sub.students.filter(n => !sub.called.includes(n));
+                if (remaining.length === 0) return;
+
+                isSpinning = true;
+                let ticks = 0;
+                const display = document.getElementById('display');
+                const timer = setInterval(async () => {
+                    display.innerText = sub.students[Math.floor(Math.random() * sub.students.length)];
+                    if (++ticks > 15) {
+                        clearInterval(timer);
+                        const picked = remaining[Math.floor(Math.random() * remaining.length)];
+                        sub.called.push(picked);
+                        sub.lastPicked = picked;
+                        sub.updatedAt = Date.now();
+                        display.innerText = picked;
+                        display.style.animation = 'none';
+                        display.offsetHeight; 
+                        display.style.animation = 'pop 0.6s ease-out forwards';
+                        renderStudents();
+                        updateUI();
+                        await saveSubject(sub);
+                        isSpinning = false;
+                        if (sub.called.length === sub.students.length) {
+                            setTimeout(() => document.getElementById('view-complete').classList.add('active'), 1000);
+                        }
+                    }
+                }, 50);
+            };
+
+            document.getElementById('btn-to-list').onclick = () => {
+                document.getElementById('header-title').innerText = "🎓 指名くん";
+                renderSubjects();
+                showView('list');
+            };
+
+            document.getElementById('btn-reset-subject').onclick = () => {
+                showConfirm("リセット", "この授業の指名状況をすべてリセットしますか？", async () => {
+                    const sub = subjects.find(s => s.id === activeId);
+                    sub.called = [];
+                    sub.lastPicked = null;
+                    sub.updatedAt = Date.now();
+                    await saveSubject(sub);
+                    initPlayView();
+                });
+            };
+
+            document.getElementById('btn-restart').onclick = () => {
+                document.getElementById('view-complete').classList.remove('active');
+                document.getElementById('btn-reset-subject').click();
+            };
+
+            document.getElementById('btn-complete-back').onclick = () => {
+                document.getElementById('view-complete').classList.remove('active');
+                document.getElementById('btn-to-list').click();
+            };
+
+            const views = { list: document.getElementById('view-list'), config: document.getElementById('view-config'), play: document.getElementById('view-play') };
+            function showView(name) {
+                Object.values(views).forEach(v => v.classList.remove('active'));
+                views[name].classList.add('active');
+                document.getElementById('btn-to-list').style.display = (name === 'list') ? 'none' : 'block';
+            }
+
+        } catch (globalErr) {
+            document.getElementById('loading').innerHTML = `
+                <div class="error-card">
+                    <h3>⚠️ システムエラー</h3>
+                    <p>${globalErr.message}</p>
+                    <p>Safariの「プライベートブラウズ」がオンになっているか、非常に古いiPadをお使いの可能性があります。</p>
+                </div>
+            `;
+        }
+
+    </script>
+</body>
+</html>
