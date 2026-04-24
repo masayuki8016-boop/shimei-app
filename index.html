@@ -115,6 +115,7 @@
 <body>
 
     <div id="loading">
+        <!-- IDを明記し、確実に取得できるようにしました -->
         <div id="loading-spinner" class="spinner"></div>
         <p id="loading-text" style="font-weight: bold; color: var(--text-muted);">接続を確認中...</p>
         <button id="btn-login-google" class="btn-accent" style="display:none; width: auto; padding: 15px 30px; font-size: 1.2rem;">Googleでログイン</button>
@@ -195,43 +196,59 @@
         const provider = new GoogleAuthProvider();
 
         let user = null, subjects = [], activeId = null, unsubscribe = null;
-        let isAuthenticating = true; // ログイン処理中フラグ
+        let isAuthenticating = true;
 
-        document.getElementById('btn-login-google').onclick = () => {
-            isAuthenticating = true;
-            signInWithRedirect(auth, provider);
-        };
+        const elLoginBtn = document.getElementById('btn-login-google');
+        if(elLoginBtn) {
+            elLoginBtn.onclick = () => {
+                isAuthenticating = true;
+                signInWithRedirect(auth, provider);
+            };
+        }
 
-        document.getElementById('btn-logout').onclick = () => { 
-            if(confirm("ログアウトしますか？")) signOut(auth).then(() => location.reload()); 
-        };
+        const elLogoutBtn = document.getElementById('btn-logout');
+        if(elLogoutBtn) {
+            elLogoutBtn.onclick = () => { 
+                if(confirm("ログアウトしますか？")) signOut(auth).then(() => location.reload()); 
+            };
+        }
 
-        // ログイン状態の管理：リダイレクト待ちを優先する
+        // 安全に要素を隠す/表示するヘルパー関数
+        function safeDisplay(id, displayStyle) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = displayStyle;
+        }
+
+        function safeSetText(id, text) {
+            const el = document.getElementById(id);
+            if (el) el.innerText = text;
+        }
+
+        // ログイン状態の管理（エラー回避を徹底）
         onAuthStateChanged(auth, async (u) => {
             if (u) {
                 user = u;
                 isAuthenticating = false;
-                document.getElementById('loading').style.display = 'none';
+                safeDisplay('loading', 'none');
                 startSync();
             } else {
-                // ユーザーがいない場合、リダイレクトから戻ってきたばかりか確認
                 try {
                     const result = await getRedirectResult(auth);
                     if (result && result.user) {
-                        // 成功（onAuthStateChangedが再度呼ばれるのでここでは何もしない）
+                        // 成功時は再び onAuthStateChanged が発火するので何もしない
                     } else {
                         // 本当に未ログイン状態
                         isAuthenticating = false;
-                        document.getElementById('loading-spinner').style.display = 'none';
-                        document.getElementById('loading-text').innerText = "ログインしてください";
-                        document.getElementById('btn-login-google').style.display = 'block';
+                        safeDisplay('loading-spinner', 'none');
+                        safeSetText('loading-text', 'ログインしてください');
+                        safeDisplay('btn-login-google', 'block');
                     }
                 } catch (e) {
                     console.error("Auth Error:", e);
-                    document.getElementById('loading-spinner').style.display = 'none';
-                    document.getElementById('error-hint').style.display = 'block';
-                    document.getElementById('error-hint').innerText = "ログインエラーが発生しました。設定を確認してください。";
-                    document.getElementById('btn-login-google').style.display = 'block';
+                    safeDisplay('loading-spinner', 'none');
+                    safeDisplay('error-hint', 'block');
+                    safeSetText('error-hint', `ログインエラーが発生しました。設定を確認してください。\n詳細: ${e.message}`);
+                    safeDisplay('btn-login-google', 'block');
                 }
             }
         });
@@ -251,9 +268,9 @@
 
         async function saveSubject(sub) {
             if (!user) return;
-            document.getElementById('sync-indicator').style.display = 'inline';
+            safeDisplay('sync-indicator', 'inline');
             await setDoc(doc(db, "users", user.uid, "subjects", sub.id), sub);
-            setTimeout(() => document.getElementById('sync-indicator').style.display = 'none', 1000);
+            setTimeout(() => safeDisplay('sync-indicator', 'none'), 1000);
         }
 
         function renderSubjects() {
@@ -270,7 +287,7 @@
                     } else {
                         activeId = sub.id;
                         if(!sub.students || sub.students.length === 0) {
-                            document.getElementById('config-subject-name').innerText = sub.name;
+                            safeSetText('config-subject-name', sub.name);
                             showView('config');
                         } else { initPlay(); }
                     }
@@ -279,32 +296,42 @@
             });
         }
 
-        document.getElementById('btn-add-subject').onclick = () => {
-            const name = document.getElementById('input-new-subject').value.trim();
-            if(!name) return;
-            const sub = { id: Date.now().toString(), name, students: [], called: [], updatedAt: Date.now() };
-            saveSubject(sub);
-            document.getElementById('input-new-subject').value = '';
-        };
+        const btnAdd = document.getElementById('btn-add-subject');
+        if(btnAdd) {
+            btnAdd.onclick = () => {
+                const input = document.getElementById('input-new-subject');
+                const name = input ? input.value.trim() : "";
+                if(!name) return;
+                const sub = { id: Date.now().toString(), name, students: [], called: [], updatedAt: Date.now() };
+                saveSubject(sub);
+                if(input) input.value = '';
+            };
+        }
 
-        document.getElementById('btn-config-done').onclick = () => {
-            const startStr = document.getElementById('input-start').value;
-            const endStr = document.getElementById('input-end').value;
-            const start = parseInt(startStr.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)));
-            const end = parseInt(endStr.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)));
-            
-            if(isNaN(start) || isNaN(end) || start > end) return;
-            
-            const sub = subjects.find(s => s.id === activeId);
-            sub.students = Array.from({length: end - start + 1}, (_, i) => i + start);
-            sub.called = []; sub.updatedAt = Date.now();
-            saveSubject(sub); initPlay();
-        };
+        const btnConfigDone = document.getElementById('btn-config-done');
+        if(btnConfigDone) {
+            btnConfigDone.onclick = () => {
+                const startStr = document.getElementById('input-start').value;
+                const endStr = document.getElementById('input-end').value;
+                const start = parseInt(startStr.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)));
+                const end = parseInt(endStr.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)));
+                
+                if(isNaN(start) || isNaN(end) || start > end) return;
+                
+                const sub = subjects.find(s => s.id === activeId);
+                if(sub) {
+                    sub.students = Array.from({length: end - start + 1}, (_, i) => i + start);
+                    sub.called = []; sub.updatedAt = Date.now();
+                    saveSubject(sub); initPlay();
+                }
+            };
+        }
 
         function initPlay() {
             const sub = subjects.find(s => s.id === activeId);
-            document.getElementById('header-title').innerText = sub.name;
-            document.getElementById('display').innerText = sub.lastPicked || "？";
+            if(!sub) return;
+            safeSetText('header-title', sub.name);
+            safeSetText('display', sub.lastPicked || "？");
             renderStudents(); updateUI(); showView('play');
         }
 
@@ -319,7 +346,7 @@
                 div.innerText = num;
                 div.onclick = () => {
                     if(sub.called.includes(num)) sub.called = sub.called.filter(n => n !== num);
-                    else { sub.called.push(num); sub.lastPicked = num; document.getElementById('display').innerText = num; }
+                    else { sub.called.push(num); sub.lastPicked = num; safeSetText('display', num); }
                     sub.updatedAt = Date.now(); saveSubject(sub);
                 };
                 grid.appendChild(div);
@@ -330,44 +357,60 @@
             const sub = subjects.find(s => s.id === activeId);
             if(!sub) return;
             const remain = sub.students.length - sub.called.length;
-            document.getElementById('label-remain').innerText = remain;
-            document.getElementById('label-progress').innerText = `${sub.called.length}/${sub.students.length}`;
-            document.getElementById('progress-fill').style.width = (sub.called.length / sub.students.length) * 100 + '%';
-            document.getElementById('btn-pick').disabled = (remain === 0);
+            safeSetText('label-remain', remain);
+            safeSetText('label-progress', `${sub.called.length}/${sub.students.length}`);
+            
+            const fill = document.getElementById('progress-fill');
+            if(fill) fill.style.width = (sub.called.length / sub.students.length) * 100 + '%';
+            
+            const pickBtn = document.getElementById('btn-pick');
+            if(pickBtn) pickBtn.disabled = (remain === 0);
         }
 
-        document.getElementById('btn-pick').onclick = () => {
-            if(isSpinning) return;
-            const sub = subjects.find(s => s.id === activeId);
-            const remaining = sub.students.filter(n => !sub.called.includes(n));
-            const display = document.getElementById('display');
-            
-            isSpinning = true;
-            display.classList.add('doki-doki');
-            let count = 0;
-            const spin = setInterval(() => {
-                display.innerText = sub.students[Math.floor(Math.random() * sub.students.length)];
-                if(++count > 25) {
-                    clearInterval(spin);
-                    display.classList.remove('doki-doki');
-                    const picked = remaining[Math.floor(Math.random() * remaining.length)];
-                    sub.called.push(picked); sub.lastPicked = picked; sub.updatedAt = Date.now();
-                    display.innerText = picked; display.classList.add('winner-pop');
-                    saveSubject(sub);
-                    isSpinning = false;
-                    if(sub.called.length === sub.students.length) setTimeout(() => document.getElementById('view-complete').classList.add('active'), 1000);
-                }
-            }, 50);
-        };
+        let isSpinning = false;
+        const pickBtn = document.getElementById('btn-pick');
+        if(pickBtn) {
+            pickBtn.onclick = () => {
+                if(isSpinning) return;
+                const sub = subjects.find(s => s.id === activeId);
+                const remaining = sub.students.filter(n => !sub.called.includes(n));
+                const display = document.getElementById('display');
+                
+                if(!display || remaining.length === 0) return;
 
-        document.getElementById('btn-to-list').onclick = () => { activeId = null; document.getElementById('header-title').innerText = "🎓 指名くん"; showView('list'); };
-        document.getElementById('btn-reset-subject').onclick = () => { if(confirm("リセットしますか？")) { const sub = subjects.find(s => s.id === activeId); sub.called = []; sub.lastPicked = null; saveSubject(sub); } };
-        document.getElementById('btn-restart').onclick = () => { document.getElementById('view-complete').classList.remove('active'); document.getElementById('btn-reset-subject').click(); };
+                isSpinning = true;
+                display.classList.add('doki-doki');
+                let count = 0;
+                const spin = setInterval(() => {
+                    display.innerText = sub.students[Math.floor(Math.random() * sub.students.length)];
+                    if(++count > 25) {
+                        clearInterval(spin);
+                        display.classList.remove('doki-doki');
+                        const picked = remaining[Math.floor(Math.random() * remaining.length)];
+                        sub.called.push(picked); sub.lastPicked = picked; sub.updatedAt = Date.now();
+                        display.innerText = picked; display.classList.add('winner-pop');
+                        saveSubject(sub);
+                        isSpinning = false;
+                        if(sub.called.length === sub.students.length) setTimeout(() => safeDisplay('view-complete', 'flex'), 1000);
+                    }
+                }, 50);
+            };
+        }
+
+        const btnToList = document.getElementById('btn-to-list');
+        if(btnToList) btnToList.onclick = () => { activeId = null; safeSetText('header-title', "🎓 指名くん"); showView('list'); };
+        
+        const btnReset = document.getElementById('btn-reset-subject');
+        if(btnReset) btnReset.onclick = () => { if(confirm("リセットしますか？")) { const sub = subjects.find(s => s.id === activeId); sub.called = []; sub.lastPicked = null; saveSubject(sub); } };
+        
+        const btnRestart = document.getElementById('btn-restart');
+        if(btnRestart) btnRestart.onclick = () => { safeDisplay('view-complete', 'none'); const r = document.getElementById('btn-reset-subject'); if(r) r.click(); };
 
         function showView(name) {
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-            document.getElementById('view-' + name).classList.add('active');
-            document.getElementById('btn-to-list').style.display = (name === 'list') ? 'none' : 'block';
+            const target = document.getElementById('view-' + name);
+            if(target) target.classList.add('active');
+            safeDisplay('btn-to-list', (name === 'list') ? 'none' : 'block');
         }
     </script>
 </body>
