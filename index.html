@@ -256,7 +256,8 @@
 
         function startSync() {
             if (unsubscribe) unsubscribe();
-            const q = query(collection(db, "users", user.uid, "subjects"));
+            // 保存先をセキュリティルールに合わせました
+            const q = query(collection(db, "artifacts", "shimei-app", "users", user.uid, "subjects"));
             unsubscribe = onSnapshot(q, (snap) => {
                 subjects = snap.docs.map(doc => doc.data());
                 renderSubjects();
@@ -270,7 +271,8 @@
         async function saveSubject(sub) {
             if (!user) return;
             safeDisplay('sync-indicator', 'inline');
-            await setDoc(doc(db, "users", user.uid, "subjects", sub.id), sub);
+            // 保存先をセキュリティルールに合わせました
+            await setDoc(doc(db, "artifacts", "shimei-app", "users", user.uid, "subjects", sub.id), sub);
             setTimeout(() => safeDisplay('sync-indicator', 'none'), 1000);
         }
 
@@ -284,7 +286,8 @@
                 div.innerHTML = `<div class="delete-icon">×</div><h3>${sub.name}</h3><p>${sub.students?.length || 0}名</p>`;
                 div.onclick = (e) => {
                     if (e.target.className === 'delete-icon') {
-                        if(confirm("削除しますか？")) deleteDoc(doc(db, "users", user.uid, "subjects", sub.id));
+                        // 削除先をセキュリティルールに合わせました
+                        if(confirm("削除しますか？")) deleteDoc(doc(db, "artifacts", "shimei-app", "users", user.uid, "subjects", sub.id));
                     } else {
                         activeId = sub.id;
                         if(!sub.students || sub.students.length === 0) {
