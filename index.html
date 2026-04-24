@@ -76,8 +76,15 @@
         .picker-container { flex: 1; align-items: center; justify-content: center; text-align: center; overflow: hidden; position: relative; }
         
         .number-display { 
-            font-size: min(50vw, 45vh); font-weight: 900; color: var(--primary); 
-            margin: auto 0; line-height: 1; letter-spacing: -3px;
+            font-size: min(30vw, 28vh); /* 4桁の数字が収まるように縮小 */
+            font-weight: 900; color: var(--primary); 
+            margin: auto 0; line-height: 1; letter-spacing: -2px;
+            transition: all 0.1s;
+        }
+        
+        /* 回転中のドキドキエフェクト */
+        .number-display.spinning {
+            animation: dokidoki 0.3s infinite alternate ease-in-out;
         }
         
         .list-area { width: 340px; flex-shrink: 0; }
@@ -127,6 +134,20 @@
             100% { transform: scale(1); }
         }
 
+        /* 決定時のドーン！というエフェクト */
+        @keyframes pop-big {
+            0% { transform: scale(1); }
+            40% { transform: scale(1.3) rotate(3deg); color: var(--danger); text-shadow: 0 10px 20px rgba(0,0,0,0.2); }
+            70% { transform: scale(1.1) rotate(-2deg); }
+            100% { transform: scale(1); color: var(--accent); }
+        }
+
+        /* 回転中の心臓の鼓動のようなエフェクト */
+        @keyframes dokidoki {
+            0% { transform: scale(1); color: var(--primary); }
+            100% { transform: scale(1.08); color: #f43f5e; }
+        }
+
         #loading {
             position: fixed; inset: 0; background: white; z-index: 200;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -166,6 +187,7 @@
 
     <header>
         <div style="display: flex; align-items: center; gap: 15px;">
+            <!-- ここにIDを追加してエラーを解消しました -->
             <h1 id="header-title">🎓 指名くん</h1>
             <span id="sync-indicator">☁️ 保存完了</span>
         </div>
@@ -191,7 +213,6 @@
             <h2 id="config-subject-name" style="font-size: 2.2rem; margin-bottom: 10px; color: var(--primary);">授業名</h2>
             <p class="text-muted" style="font-size: 1.2rem;">出席番号の範囲を設定してください</p>
             <div style="display: flex; align-items: center; gap: 15px; margin: 40px 0 20px 0;">
-                <!-- 全角入力にも強いtype="tel"に変更 -->
                 <input type="tel" id="input-start" value="1" inputmode="numeric" pattern="[0-9]*" style="width: 140px; text-align: center; font-size: 2.5rem; font-weight: bold;">
                 <span style="font-size: 3rem; color: var(--border);">〜</span>
                 <input type="tel" id="input-end" value="30" inputmode="numeric" pattern="[0-9]*" style="width: 140px; text-align: center; font-size: 2.5rem; font-weight: bold;">
@@ -207,9 +228,7 @@
                 <div style="background: var(--primary-light); color: var(--primary); padding: 10px 24px; border-radius: 30px; font-weight: bold; margin-bottom: 15px; font-size: 1.1rem;">
                     未指名：残り <span id="label-remain" style="font-size: 1.3rem;">0</span> 名
                 </div>
-                <!-- 巨大番号 -->
                 <div id="display" class="number-display">？</div>
-                
                 <button id="btn-pick" class="btn-accent">次の人を指名！</button>
                 <button id="btn-reset-subject" class="btn-ghost" style="margin-bottom: 10px;">この授業の記録をリセット</button>
             </div>
@@ -260,26 +279,29 @@
         const forceOpenBtn = document.getElementById('btn-force-open');
 
         let syncStatus = "Firebaseの認証を待っています...";
-        loadingText.innerText = syncStatus;
+        if(loadingText) loadingText.innerText = syncStatus;
 
         // タイムアウト設定
         setTimeout(() => {
-            if (loadingDiv.style.display !== 'none') {
-                document.getElementById('loading-spinner').style.display = 'none';
-                loadingText.innerHTML = `
+            if (loadingDiv && loadingDiv.style.display !== 'none') {
+                const spinner = document.getElementById('loading-spinner');
+                if(spinner) spinner.style.display = 'none';
+                if(loadingText) loadingText.innerHTML = `
                     <span style="color:var(--danger)">同期が遅れています。</span><br><br>
                     現在の状態: <b>${syncStatus}</b><br><br>
                     ※学校のWi-Fi制限や、ルールの設定忘れの可能性があります。
                 `;
-                forceOpenBtn.style.display = 'block';
+                if(forceOpenBtn) forceOpenBtn.style.display = 'block';
             }
         }, 10000);
 
         // スキップボタン
-        forceOpenBtn.onclick = () => {
-            loadingDiv.style.display = 'none';
-            renderSubjects(); // ローカルデータで描画
-        };
+        if(forceOpenBtn) {
+            forceOpenBtn.onclick = () => {
+                loadingDiv.style.display = 'none';
+                renderSubjects(); // ローカルデータで描画
+            };
+        }
 
         try {
             const app = initializeApp(myFirebaseConfig);
@@ -294,16 +316,24 @@
 
             const modal = document.getElementById('modal-confirm');
             const showConfirm = (title, msg, onOk) => {
-                document.getElementById('confirm-title').innerText = title;
-                document.getElementById('confirm-msg').innerText = msg;
+                const titleEl = document.getElementById('confirm-title');
+                const msgEl = document.getElementById('confirm-msg');
+                if(titleEl) titleEl.innerText = title;
+                if(msgEl) msgEl.innerText = msg;
                 confirmAction = onOk;
-                modal.classList.add('active');
+                if(modal) modal.classList.add('active');
             };
-            document.getElementById('confirm-cancel').onclick = () => modal.classList.remove('active');
-            document.getElementById('confirm-ok').onclick = () => {
-                if(confirmAction) confirmAction();
-                modal.classList.remove('active');
-            };
+            
+            const btnConfirmCancel = document.getElementById('confirm-cancel');
+            if(btnConfirmCancel) btnConfirmCancel.onclick = () => { if(modal) modal.classList.remove('active'); };
+            
+            const btnConfirmOk = document.getElementById('confirm-ok');
+            if(btnConfirmOk) {
+                btnConfirmOk.onclick = () => {
+                    if(confirmAction) confirmAction();
+                    if(modal) modal.classList.remove('active');
+                };
+            }
 
             const getSubjectsRef = () => collection(db, 'users', user.uid, 'subjects');
 
@@ -311,19 +341,20 @@
                 if (u) {
                     user = u;
                     syncStatus = "クラウドからデータを取得しています...";
-                    loadingText.innerText = syncStatus;
+                    if(loadingText) loadingText.innerText = syncStatus;
                     await fetchSubjects();
-                    loadingDiv.style.display = 'none';
+                    if(loadingDiv) loadingDiv.style.display = 'none';
                 }
             });
             
             signInAnonymously(auth).catch(e => {
                 console.error("Auth Error", e);
-                document.getElementById('loading-spinner').style.display = 'none';
-                forceOpenBtn.style.display = 'block'; 
+                const spinner = document.getElementById('loading-spinner');
+                if(spinner) spinner.style.display = 'none';
+                if(forceOpenBtn) forceOpenBtn.style.display = 'block'; 
                 
                 if (e.code === 'auth/configuration-not-found' || e.code === 'auth/admin-restricted-operation') {
-                    loadingDiv.innerHTML = `
+                    if(loadingDiv) loadingDiv.innerHTML = `
                         <div class="error-card">
                             <h3>⚠️ 認証エラー</h3>
                             <p>Firebaseの「匿名ログイン」が無効です。Authenticationの設定を確認してください。</p>
@@ -331,7 +362,7 @@
                         </div>
                     `;
                 } else {
-                    loadingText.innerHTML = `接続エラー: ${e.message}<br>ネットワークが制限されている可能性があります。`;
+                    if(loadingText) loadingText.innerHTML = `接続エラー: ${e.message}<br>ネットワークが制限されている可能性があります。`;
                 }
             });
 
@@ -341,7 +372,6 @@
                     const snap = await getDocs(q);
                     subjects = [];
                     snap.forEach(doc => { 
-                        // データが壊れていても安全に読み込む処理
                         const data = doc.data();
                         data.students = data.students || [];
                         data.called = data.called || [];
@@ -365,22 +395,27 @@
                 if (!user) return; 
                 
                 const indicator = document.getElementById('sync-indicator');
-                indicator.style.display = 'inline-block';
-                indicator.innerText = "☁️ 保存中...";
+                if(indicator) {
+                    indicator.style.display = 'inline-block';
+                    indicator.innerText = "☁️ 保存中...";
+                }
                 
                 setDoc(doc(getSubjectsRef(), subject.id), subject)
                     .then(() => {
-                        indicator.innerText = "☁️ 保存完了";
-                        setTimeout(() => indicator.style.display = 'none', 1200);
+                        if(indicator) {
+                            indicator.innerText = "☁️ 保存完了";
+                            setTimeout(() => indicator.style.display = 'none', 1200);
+                        }
                     })
                     .catch((e) => {
                         console.error("Save error", e);
-                        indicator.innerText = "⚠️ オフライン保存";
+                        if(indicator) indicator.innerText = "⚠️ オフライン保存";
                     });
             }
 
             function renderSubjects() {
                 const grid = document.getElementById('subject-grid');
+                if(!grid) return;
                 grid.innerHTML = '';
                 subjects.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).forEach(sub => {
                     const div = document.createElement('div');
@@ -410,31 +445,35 @@
                 });
             }
 
-            document.getElementById('btn-add-subject').onclick = function() {
-                try {
-                    const nameInput = document.getElementById('input-new-subject');
-                    const name = nameInput.value.trim();
-                    if (!name) return;
-                    
-                    this.disabled = true;
-                    const originalText = this.innerText;
-                    this.innerText = "作成中...";
-                    
-                    const newId = generateId();
-                    const newSub = { id: newId, name, students: [], called: [], lastPicked: null, start: 1, end: 30, updatedAt: Date.now() };
-                    subjects.push(newSub);
-                    
-                    nameInput.value = '';
-                    this.innerText = originalText;
-                    this.disabled = false;
-                    renderSubjects();
-                    selectSubject(newId);
-                    
-                    saveSubject(newSub);
-                } catch(e) {
-                    alert("作成エラー: " + e.message);
-                }
-            };
+            const btnAddSubject = document.getElementById('btn-add-subject');
+            if(btnAddSubject) {
+                btnAddSubject.onclick = function() {
+                    try {
+                        const nameInput = document.getElementById('input-new-subject');
+                        if(!nameInput) return;
+                        const name = nameInput.value.trim();
+                        if (!name) return;
+                        
+                        this.disabled = true;
+                        const originalText = this.innerText;
+                        this.innerText = "作成中...";
+                        
+                        const newId = generateId();
+                        const newSub = { id: newId, name, students: [], called: [], lastPicked: null, start: 1, end: 30, updatedAt: Date.now() };
+                        subjects.push(newSub);
+                        
+                        nameInput.value = '';
+                        this.innerText = originalText;
+                        this.disabled = false;
+                        renderSubjects();
+                        selectSubject(newId);
+                        
+                        saveSubject(newSub);
+                    } catch(e) {
+                        alert("作成エラー: " + e.message);
+                    }
+                };
+            }
 
             function selectSubject(id) {
                 try {
@@ -442,8 +481,10 @@
                     const sub = subjects.find(s => s.id === id);
                     if (!sub) return;
                     if (!sub.students || sub.students.length === 0) {
-                        document.getElementById('config-subject-name').innerText = sub.name;
-                        document.getElementById('config-error-msg').innerText = ""; // エラーを消す
+                        const configName = document.getElementById('config-subject-name');
+                        if(configName) configName.innerText = sub.name;
+                        const configError = document.getElementById('config-error-msg');
+                        if(configError) configError.innerText = "";
                         showView('config');
                     } else {
                         initPlayView();
@@ -453,64 +494,73 @@
                 }
             }
 
-            // 【重要】全角文字の入力に対応・エラー表示の追加
-            document.getElementById('btn-config-done').onclick = () => {
-                try {
-                    const errorMsg = document.getElementById('config-error-msg');
-                    errorMsg.innerText = ""; // メッセージをリセット
+            const btnConfigDone = document.getElementById('btn-config-done');
+            if(btnConfigDone) {
+                btnConfigDone.onclick = () => {
+                    try {
+                        const errorMsg = document.getElementById('config-error-msg');
+                        if(errorMsg) errorMsg.innerText = "";
 
-                    // 全角数字を半角に変換し、数字以外を取り除く便利関数
-                    const toHalfWidth = (str) => {
-                        if (!str) return "";
-                        return String(str).replace(/[０-９]/g, function(s) {
-                            return String.fromCharCode(s.charCodeAt(0) - 0xFEE0);
-                        }).replace(/[^0-9]/g, '');
-                    };
+                        const toHalfWidth = (str) => {
+                            if (!str) return "";
+                            return String(str).replace(/[０-９]/g, function(s) {
+                                return String.fromCharCode(s.charCodeAt(0) - 0xFEE0);
+                            }).replace(/[^0-9]/g, '');
+                        };
 
-                    const startStr = document.getElementById('input-start').value;
-                    const endStr = document.getElementById('input-end').value;
-                    
-                    const start = parseInt(toHalfWidth(startStr));
-                    const end = parseInt(toHalfWidth(endStr));
-                    
-                    // バリデーション（入力チェック）
-                    if (isNaN(start) || isNaN(end)) {
-                        errorMsg.innerText = "正しい数字を入力してください";
-                        return;
-                    }
-                    if (start > end) {
-                        errorMsg.innerText = "開始番号は終了番号より小さくしてください";
-                        return;
-                    }
-                    if (end - start > 1000) {
-                        errorMsg.innerText = "範囲が広すぎます（最大1000名まで）";
-                        return;
-                    }
+                        const startInput = document.getElementById('input-start');
+                        const endInput = document.getElementById('input-end');
+                        
+                        const startStr = startInput ? startInput.value : "";
+                        const endStr = endInput ? endInput.value : "";
+                        
+                        const start = parseInt(toHalfWidth(startStr));
+                        const end = parseInt(toHalfWidth(endStr));
+                        
+                        if (isNaN(start) || isNaN(end)) {
+                            if(errorMsg) errorMsg.innerText = "正しい数字を入力してください";
+                            return;
+                        }
+                        if (start > end) {
+                            if(errorMsg) errorMsg.innerText = "開始番号は終了番号より小さくしてください";
+                            return;
+                        }
+                        if (end - start > 1000) {
+                            if(errorMsg) errorMsg.innerText = "範囲が広すぎます（最大1000名まで）";
+                            return;
+                        }
 
-                    const sub = subjects.find(s => s.id === activeId);
-                    if (!sub) {
-                        errorMsg.innerText = "データが見つかりません。一覧からやり直してください。";
-                        return;
+                        const sub = subjects.find(s => s.id === activeId);
+                        if (!sub) {
+                            if(errorMsg) errorMsg.innerText = "データが見つかりません。一覧からやり直してください。";
+                            return;
+                        }
+                        
+                        sub.start = start;
+                        sub.end = end;
+                        sub.students = Array.from({length: end - start + 1}, (_, i) => i + start);
+                        sub.called = [];
+                        sub.updatedAt = Date.now();
+                        
+                        initPlayView();
+                        saveSubject(sub);
+                    } catch(e) {
+                        alert("設定エラー: " + e.message);
                     }
-                    
-                    sub.start = start;
-                    sub.end = end;
-                    sub.students = Array.from({length: end - start + 1}, (_, i) => i + start);
-                    sub.called = [];
-                    sub.updatedAt = Date.now();
-                    
-                    initPlayView();
-                    saveSubject(sub);
-                } catch(e) {
-                    alert("設定エラー: " + e.message);
-                }
-            };
+                };
+            }
 
             function initPlayView() {
                 try {
                     const sub = subjects.find(s => s.id === activeId);
-                    document.getElementById('header-title').innerText = sub.name;
-                    document.getElementById('display').innerText = sub.lastPicked || "？";
+                    if(!sub) return;
+                    
+                    const titleEl = document.getElementById('header-title');
+                    if(titleEl) titleEl.innerText = sub.name;
+                    
+                    const displayEl = document.getElementById('display');
+                    if(displayEl) displayEl.innerText = sub.lastPicked || "？";
+                    
                     renderStudents();
                     updateUI();
                     showView('play');
@@ -521,10 +571,15 @@
 
             function renderStudents() {
                 const sub = subjects.find(s => s.id === activeId);
+                if(!sub) return;
+                
                 const grid = document.getElementById('student-grid');
+                if(!grid) return;
                 grid.innerHTML = '';
+                
                 const studentsList = sub.students || [];
                 const calledList = sub.called || [];
+                
                 studentsList.forEach(num => {
                     const div = document.createElement('div');
                     const isCalled = calledList.includes(num);
@@ -535,12 +590,14 @@
                             sub.called = sub.called.filter(n => n !== num);
                             if (sub.lastPicked === num) {
                                 sub.lastPicked = null;
-                                document.getElementById('display').innerText = "？";
+                                const displayEl = document.getElementById('display');
+                                if(displayEl) displayEl.innerText = "？";
                             }
                         } else {
                             sub.called.push(num);
                             sub.lastPicked = num;
-                            document.getElementById('display').innerText = num;
+                            const displayEl = document.getElementById('display');
+                            if(displayEl) displayEl.innerText = num;
                         }
                         sub.updatedAt = Date.now();
                         
@@ -554,99 +611,172 @@
 
             function updateUI() {
                 const sub = subjects.find(s => s.id === activeId);
+                if(!sub) return;
+                
                 const studentsList = sub.students || [];
                 const calledList = sub.called || [];
                 const remain = studentsList.length - calledList.length;
-                document.getElementById('label-remain').innerText = remain;
-                document.getElementById('label-progress').innerText = `${calledList.length} / ${studentsList.length}`;
-                const percent = studentsList.length > 0 ? (calledList.length / studentsList.length) * 100 : 0;
-                document.getElementById('progress-fill').style.width = percent + '%';
-                document.getElementById('btn-pick').disabled = (remain === 0);
-                document.getElementById('btn-pick').style.opacity = (remain === 0) ? "0.4" : "1";
+                
+                const labelRemain = document.getElementById('label-remain');
+                if(labelRemain) labelRemain.innerText = remain;
+                
+                const labelProgress = document.getElementById('label-progress');
+                if(labelProgress) labelProgress.innerText = `${calledList.length} / ${studentsList.length}`;
+                
+                const progressFill = document.getElementById('progress-fill');
+                if(progressFill) {
+                    const percent = studentsList.length > 0 ? (calledList.length / studentsList.length) * 100 : 0;
+                    progressFill.style.width = percent + '%';
+                }
+                
+                const btnPick = document.getElementById('btn-pick');
+                if(btnPick) {
+                    btnPick.disabled = (remain === 0);
+                    btnPick.style.opacity = (remain === 0) ? "0.4" : "1";
+                }
             }
 
-            document.getElementById('btn-pick').onclick = () => {
-                if (isSpinning) return;
-                const sub = subjects.find(s => s.id === activeId);
-                const remaining = sub.students.filter(n => !sub.called.includes(n));
-                if (remaining.length === 0) return;
+            const btnPick = document.getElementById('btn-pick');
+            if(btnPick) {
+                btnPick.onclick = () => {
+                    if (isSpinning) return;
+                    const sub = subjects.find(s => s.id === activeId);
+                    if(!sub) return;
+                    
+                    const studentsList = sub.students || [];
+                    const calledList = sub.called || [];
+                    const remaining = studentsList.filter(n => !calledList.includes(n));
+                    if (remaining.length === 0) return;
 
-                isSpinning = true;
-                let ticks = 0;
-                const display = document.getElementById('display');
-                const timer = setInterval(() => {
-                    display.innerText = sub.students[Math.floor(Math.random() * sub.students.length)];
-                    if (++ticks > 15) {
-                        clearInterval(timer);
-                        const picked = remaining[Math.floor(Math.random() * remaining.length)];
-                        sub.called.push(picked);
-                        sub.lastPicked = picked;
+                    isSpinning = true;
+                    
+                    const display = document.getElementById('display');
+                    if(display) display.classList.add('spinning'); // ドキドキエフェクト開始
+
+                    let delay = 30; // 最初は超高速
+                    let count = 0;
+                    const maxCount = 28; // 回転させる回数（タメを作るため少し多め）
+                    
+                    const spin = () => {
+                        if(display) display.innerText = studentsList[Math.floor(Math.random() * studentsList.length)];
+                        count++;
+                        
+                        if (count < maxCount) {
+                            if (count > 15) delay += 15; // 後半は徐々に遅くなってタメを作る
+                            if (count > 22) delay += 35; // 終盤はさらにじらしてドキドキ感アップ
+                            setTimeout(spin, delay);
+                        } else {
+                            // 決定！
+                            if(display) display.classList.remove('spinning');
+                            
+                            const picked = remaining[Math.floor(Math.random() * remaining.length)];
+                            sub.called.push(picked);
+                            sub.lastPicked = picked;
+                            sub.updatedAt = Date.now();
+                            
+                            if(display) {
+                                display.innerText = picked;
+                                display.style.animation = 'none';
+                                display.offsetHeight; 
+                                display.style.animation = 'pop-big 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards'; // 派手な登場！
+                            }
+                            
+                            renderStudents();
+                            updateUI();
+                            saveSubject(sub);
+                            isSpinning = false;
+                            
+                            if (sub.called.length === studentsList.length) {
+                                setTimeout(() => {
+                                    const completeView = document.getElementById('view-complete');
+                                    if(completeView) completeView.classList.add('active');
+                                }, 1500);
+                            }
+                        }
+                    };
+                    spin(); // ルーレット開始
+                };
+            }
+
+            const btnToList = document.getElementById('btn-to-list');
+            if(btnToList) {
+                btnToList.onclick = () => {
+                    try {
+                        const titleEl = document.getElementById('header-title');
+                        if(titleEl) titleEl.innerText = "🎓 指名くん";
+                        renderSubjects();
+                        showView('list');
+                    } catch(e) {
+                        alert("一覧へ戻るエラー: " + e.message);
+                    }
+                };
+            }
+
+            const btnReset = document.getElementById('btn-reset-subject');
+            if(btnReset) {
+                btnReset.onclick = () => {
+                    showConfirm("リセット", "この授業の指名状況をすべてリセットしますか？", () => {
+                        const sub = subjects.find(s => s.id === activeId);
+                        if(!sub) return;
+                        sub.called = [];
+                        sub.lastPicked = null;
                         sub.updatedAt = Date.now();
                         
-                        display.innerText = picked;
-                        display.style.animation = 'none';
-                        display.offsetHeight; 
-                        display.style.animation = 'pop 0.6s ease-out forwards';
-                        
-                        renderStudents();
-                        updateUI();
+                        initPlayView();
                         saveSubject(sub);
-                        isSpinning = false;
-                        
-                        if (sub.called.length === sub.students.length) {
-                            setTimeout(() => document.getElementById('view-complete').classList.add('active'), 1000);
-                        }
-                    }
-                }, 50);
-            };
+                    });
+                };
+            }
 
-            document.getElementById('btn-to-list').onclick = () => {
-                try {
-                    document.getElementById('header-title').innerText = "🎓 指名くん";
-                    renderSubjects();
-                    showView('list');
-                } catch(e) {
-                    alert("一覧へ戻るエラー: " + e.message);
-                }
-            };
+            const btnRestart = document.getElementById('btn-restart');
+            if(btnRestart) {
+                btnRestart.onclick = () => {
+                    const completeView = document.getElementById('view-complete');
+                    if(completeView) completeView.classList.remove('active');
+                    const resetBtn = document.getElementById('btn-reset-subject');
+                    if(resetBtn) resetBtn.click();
+                };
+            }
 
-            document.getElementById('btn-reset-subject').onclick = () => {
-                showConfirm("リセット", "この授業の指名状況をすべてリセットしますか？", () => {
-                    const sub = subjects.find(s => s.id === activeId);
-                    sub.called = [];
-                    sub.lastPicked = null;
-                    sub.updatedAt = Date.now();
-                    
-                    initPlayView();
-                    saveSubject(sub);
-                });
-            };
+            const btnCompleteBack = document.getElementById('btn-complete-back');
+            if(btnCompleteBack) {
+                btnCompleteBack.onclick = () => {
+                    const completeView = document.getElementById('view-complete');
+                    if(completeView) completeView.classList.remove('active');
+                    const toListBtn = document.getElementById('btn-to-list');
+                    if(toListBtn) toListBtn.click();
+                };
+            }
 
-            document.getElementById('btn-restart').onclick = () => {
-                document.getElementById('view-complete').classList.remove('active');
-                document.getElementById('btn-reset-subject').click();
+            const views = { 
+                list: document.getElementById('view-list'), 
+                config: document.getElementById('view-config'), 
+                play: document.getElementById('view-play') 
             };
-
-            document.getElementById('btn-complete-back').onclick = () => {
-                document.getElementById('view-complete').classList.remove('active');
-                document.getElementById('btn-to-list').click();
-            };
-
-            const views = { list: document.getElementById('view-list'), config: document.getElementById('view-config'), play: document.getElementById('view-play') };
+            
             function showView(name) {
-                Object.values(views).forEach(v => v.classList.remove('active'));
-                views[name].classList.add('active');
-                document.getElementById('btn-to-list').style.display = (name === 'list') ? 'none' : 'block';
+                Object.values(views).forEach(v => {
+                    if(v) v.classList.remove('active');
+                });
+                if(views[name]) views[name].classList.add('active');
+                
+                const btnToList = document.getElementById('btn-to-list');
+                if(btnToList) {
+                    btnToList.style.display = (name === 'list') ? 'none' : 'block';
+                }
             }
 
         } catch (globalErr) {
-            document.getElementById('loading').innerHTML = `
-                <div class="error-card">
-                    <h3>⚠️ システムエラー</h3>
-                    <p>${globalErr.message}</p>
-                    <p>Safariの「プライベートブラウズ」がオンになっているか、非常に古いiPadをお使いの可能性があります。</p>
-                </div>
-            `;
+            const loadingDiv = document.getElementById('loading');
+            if(loadingDiv) {
+                loadingDiv.innerHTML = `
+                    <div class="error-card">
+                        <h3>⚠️ システムエラー</h3>
+                        <p>${globalErr.message}</p>
+                        <p>Safariの「プライベートブラウズ」がオンになっているか、非常に古いiPadをお使いの可能性があります。</p>
+                    </div>
+                `;
+            }
         }
 
     </script>
