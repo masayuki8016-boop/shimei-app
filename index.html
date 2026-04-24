@@ -149,7 +149,7 @@
     <div id="loading">
         <div id="loading-spinner" class="spinner"></div>
         <p id="loading-text" style="color: var(--text-muted); font-weight: bold; font-size: 1.2rem;">クラウドと同期中...</p>
-        <button id="btn-force-open" class="btn-ghost" style="display:none; margin-top: 20px;">同期をスキップして開く</button>
+        <button id="btn-force-open" class="btn-ghost" style="display:none; margin-top: 20px; padding: 16px 24px; font-size: 1.1rem; border: 2px solid var(--primary); color: var(--primary); background: white;">同期をスキップして開く</button>
     </div>
 
     <!-- 確認ダイアログ -->
@@ -237,7 +237,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, collection, getDocs, deleteDoc, query, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, collection, getDocs, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- 設定値の埋め込み ---
         const myFirebaseConfig = {
@@ -249,7 +249,6 @@
             appId: "1:729865983172:web:12d79c9de229a6ba7e6591"
         };
 
-        // 安全なID生成関数（crypto.randomUUIDの代わり）
         const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
         // UI要素
@@ -257,28 +256,38 @@
         const loadingText = document.getElementById('loading-text');
         const forceOpenBtn = document.getElementById('btn-force-open');
 
-        // タイムアウト設定：10秒経っても開かない場合はボタンを出す
+        let syncStatus = "Firebaseの認証を待っています...";
+        loadingText.innerText = syncStatus;
+
+        // タイムアウト設定：どこで止まっているか表示する
         setTimeout(() => {
             if (loadingDiv.style.display !== 'none') {
-                loadingText.innerText = "同期が遅れています。オフラインの可能性があります。";
+                document.getElementById('loading-spinner').style.display = 'none';
+                loadingText.innerHTML = `
+                    <span style="color:var(--danger)">同期が遅れています。</span><br><br>
+                    現在の状態: <b>${syncStatus}</b><br><br>
+                    ※学校のWi-Fi制限や、ルールの設定忘れの可能性があります。
+                `;
                 forceOpenBtn.style.display = 'block';
             }
         }, 10000);
 
-        forceOpenBtn.onclick = () => loadingDiv.style.display = 'none';
+        // スキップボタンで強制的に画面を開く
+        forceOpenBtn.onclick = () => {
+            loadingDiv.style.display = 'none';
+            renderSubjects(); // ローカルデータがあれば描画
+        };
 
         try {
             const app = initializeApp(myFirebaseConfig);
             const auth = getAuth(app);
             const db = getFirestore(app);
 
-            // オフライン対応（iPadの実習棟などで便利）
-            enableIndexedDbPersistence(db).catch((err) => {
-                console.warn("Offline persistence not enabled:", err.code);
-            });
+            // ※トラブルの元になるIndexedDB（オフライン永続化）のコードは削除して安定させました
 
             let user = null;
-            let subjects = [];
+            // ローカルストレージからも読み込めるようにしておく（スキップ時用）
+            let subjects = JSON.parse(localStorage.getItem('shimei_local_db')) || [];
             let activeId = null;
             let isSpinning = false;
             let confirmAction = null;
@@ -301,6 +310,8 @@
             onAuthStateChanged(auth, async (u) => {
                 if (u) {
                     user = u;
+                    syncStatus = "クラウドからデータを取得しています...";
+                    loadingText.innerText = syncStatus;
                     await fetchSubjects();
                     loadingDiv.style.display = 'none';
                 }
@@ -309,6 +320,8 @@
             signInAnonymously(auth).catch(e => {
                 console.error("Auth Error", e);
                 document.getElementById('loading-spinner').style.display = 'none';
+                forceOpenBtn.style.display = 'block'; // エラー時もスキップボタンを出す
+                
                 if (e.code === 'auth/configuration-not-found' || e.code === 'auth/admin-restricted-operation') {
                     loadingDiv.innerHTML = `
                         <div class="error-card">
@@ -318,7 +331,7 @@
                         </div>
                     `;
                 } else {
-                    loadingText.innerHTML = `接続エラー: ${e.message}<br>ブラウザで開き直してください。`;
+                    loadingText.innerHTML = `接続エラー: ${e.message}<br>ネットワークが制限されている可能性があります。`;
                 }
             });
 
@@ -328,18 +341,34 @@
                     const snap = await getDocs(q);
                     subjects = [];
                     snap.forEach(doc => { subjects.push(doc.data()); });
+                    // ローカルにもバックアップ
+                    localStorage.setItem('shimei_local_db', JSON.stringify(subjects));
                     renderSubjects();
-                } catch (e) { console.error("Fetch error", e); }
+                } catch (e) { 
+                    console.error("Fetch error", e);
+                    syncStatus = "データの取得に失敗しました（権限エラー等）";
+                }
             }
 
             async function saveSubject(subject) {
-                if (!user) return;
+                // ローカルに即座にバックアップ
+                const idx = subjects.findIndex(s => s.id === subject.id);
+                if (idx !== -1) subjects[idx] = subject; else subjects.push(subject);
+                localStorage.setItem('shimei_local_db', JSON.stringify(subjects));
+
+                if (!user) return; // スキップ時はここまで
+                
                 const indicator = document.getElementById('sync-indicator');
                 indicator.style.display = 'inline-block';
+                indicator.innerText = "☁️ 保存中...";
                 try {
                     await setDoc(doc(getSubjectsRef(), subject.id), subject);
+                    indicator.innerText = "☁️ 保存完了";
                     setTimeout(() => indicator.style.display = 'none', 1200);
-                } catch (e) { console.error("Save error", e); }
+                } catch (e) { 
+                    console.error("Save error", e);
+                    indicator.innerText = "⚠️ 保存エラー（ルール未設定など）";
+                }
             }
 
             function renderSubjects() {
@@ -359,7 +388,8 @@
                         if (e.target.classList.contains('delete-icon')) {
                             showConfirm("授業の削除", `「${sub.name}」を完全に削除しますか？`, async () => {
                                 subjects = subjects.filter(s => s.id !== sub.id);
-                                await deleteDoc(doc(getSubjectsRef(), sub.id));
+                                localStorage.setItem('shimei_local_db', JSON.stringify(subjects));
+                                if (user) await deleteDoc(doc(getSubjectsRef(), sub.id));
                                 renderSubjects();
                             });
                         } else {
