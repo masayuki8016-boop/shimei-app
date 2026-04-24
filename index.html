@@ -340,7 +340,13 @@
                     const q = query(getSubjectsRef());
                     const snap = await getDocs(q);
                     subjects = [];
-                    snap.forEach(doc => { subjects.push(doc.data()); });
+                    snap.forEach(doc => { 
+                        // データが壊れていても安全に読み込む処理
+                        const data = doc.data();
+                        data.students = data.students || [];
+                        data.called = data.called || [];
+                        subjects.push(data); 
+                    });
                     localStorage.setItem('shimei_local_db', JSON.stringify(subjects));
                     renderSubjects();
                 } catch (e) { 
@@ -350,6 +356,8 @@
             }
 
             function saveSubject(subject) {
+                subject.students = subject.students || [];
+                subject.called = subject.called || [];
                 const idx = subjects.findIndex(s => s.id === subject.id);
                 if (idx !== -1) subjects[idx] = subject; else subjects.push(subject);
                 localStorage.setItem('shimei_local_db', JSON.stringify(subjects));
@@ -374,14 +382,16 @@
             function renderSubjects() {
                 const grid = document.getElementById('subject-grid');
                 grid.innerHTML = '';
-                subjects.sort((a, b) => b.updatedAt - a.updatedAt).forEach(sub => {
+                subjects.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).forEach(sub => {
                     const div = document.createElement('div');
                     div.className = 'subject-card';
-                    const progress = sub.students.length > 0 ? Math.round((sub.called.length / sub.students.length) * 100) : 0;
+                    const studentsList = sub.students || [];
+                    const calledList = sub.called || [];
+                    const progress = studentsList.length > 0 ? Math.round((calledList.length / studentsList.length) * 100) : 0;
                     div.innerHTML = `
                         <div class="delete-icon">×</div>
                         <h3>${sub.name}</h3>
-                        <p style="color: var(--text-muted); margin:0; font-size:0.9rem;">${sub.students.length}名中 ${sub.called.length}名済み</p>
+                        <p style="color: var(--text-muted); margin:0; font-size:0.9rem;">${studentsList.length}名中 ${calledList.length}名済み</p>
                         <div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>
                     `;
                     div.onclick = (e) => {
@@ -401,100 +411,123 @@
             }
 
             document.getElementById('btn-add-subject').onclick = function() {
-                const nameInput = document.getElementById('input-new-subject');
-                const name = nameInput.value.trim();
-                if (!name) return;
-                
-                this.disabled = true;
-                const originalText = this.innerText;
-                this.innerText = "作成中...";
-                
-                const newId = generateId();
-                const newSub = { id: newId, name, students: [], called: [], lastPicked: null, start: 1, end: 30, updatedAt: Date.now() };
-                subjects.push(newSub);
-                
-                nameInput.value = '';
-                this.innerText = originalText;
-                this.disabled = false;
-                renderSubjects();
-                selectSubject(newId);
-                
-                saveSubject(newSub);
+                try {
+                    const nameInput = document.getElementById('input-new-subject');
+                    const name = nameInput.value.trim();
+                    if (!name) return;
+                    
+                    this.disabled = true;
+                    const originalText = this.innerText;
+                    this.innerText = "作成中...";
+                    
+                    const newId = generateId();
+                    const newSub = { id: newId, name, students: [], called: [], lastPicked: null, start: 1, end: 30, updatedAt: Date.now() };
+                    subjects.push(newSub);
+                    
+                    nameInput.value = '';
+                    this.innerText = originalText;
+                    this.disabled = false;
+                    renderSubjects();
+                    selectSubject(newId);
+                    
+                    saveSubject(newSub);
+                } catch(e) {
+                    alert("作成エラー: " + e.message);
+                }
             };
 
             function selectSubject(id) {
-                activeId = id;
-                const sub = subjects.find(s => s.id === id);
-                if (sub.students.length === 0) {
-                    document.getElementById('config-subject-name').innerText = sub.name;
-                    document.getElementById('config-error-msg').innerText = ""; // エラーを消す
-                    showView('config');
-                } else {
-                    initPlayView();
+                try {
+                    activeId = id;
+                    const sub = subjects.find(s => s.id === id);
+                    if (!sub) return;
+                    if (!sub.students || sub.students.length === 0) {
+                        document.getElementById('config-subject-name').innerText = sub.name;
+                        document.getElementById('config-error-msg').innerText = ""; // エラーを消す
+                        showView('config');
+                    } else {
+                        initPlayView();
+                    }
+                } catch(e) {
+                    alert("選択エラー: " + e.message);
                 }
             }
 
             // 【重要】全角文字の入力に対応・エラー表示の追加
             document.getElementById('btn-config-done').onclick = () => {
-                const errorMsg = document.getElementById('config-error-msg');
-                errorMsg.innerText = ""; // メッセージをリセット
+                try {
+                    const errorMsg = document.getElementById('config-error-msg');
+                    errorMsg.innerText = ""; // メッセージをリセット
 
-                // 全角数字を半角に変換し、数字以外を取り除く便利関数
-                const toHalfWidth = (str) => {
-                    return str.replace(/[０-９]/g, function(s) {
-                        return String.fromCharCode(s.charCodeAt(0) - 0xFEE0);
-                    }).replace(/[^0-9]/g, '');
-                };
+                    // 全角数字を半角に変換し、数字以外を取り除く便利関数
+                    const toHalfWidth = (str) => {
+                        if (!str) return "";
+                        return String(str).replace(/[０-９]/g, function(s) {
+                            return String.fromCharCode(s.charCodeAt(0) - 0xFEE0);
+                        }).replace(/[^0-9]/g, '');
+                    };
 
-                const startStr = toHalfWidth(document.getElementById('input-start').value);
-                const endStr = toHalfWidth(document.getElementById('input-end').value);
-                
-                const start = parseInt(startStr);
-                const end = parseInt(endStr);
-                
-                // バリデーション（入力チェック）
-                if (isNaN(start) || isNaN(end)) {
-                    errorMsg.innerText = "正しい数字を入力してください";
-                    return;
-                }
-                if (start > end) {
-                    errorMsg.innerText = "開始番号は終了番号より小さくしてください";
-                    return;
-                }
-                if (end - start > 1000) {
-                    errorMsg.innerText = "範囲が広すぎます（最大1000名まで）";
-                    return;
-                }
+                    const startStr = document.getElementById('input-start').value;
+                    const endStr = document.getElementById('input-end').value;
+                    
+                    const start = parseInt(toHalfWidth(startStr));
+                    const end = parseInt(toHalfWidth(endStr));
+                    
+                    // バリデーション（入力チェック）
+                    if (isNaN(start) || isNaN(end)) {
+                        errorMsg.innerText = "正しい数字を入力してください";
+                        return;
+                    }
+                    if (start > end) {
+                        errorMsg.innerText = "開始番号は終了番号より小さくしてください";
+                        return;
+                    }
+                    if (end - start > 1000) {
+                        errorMsg.innerText = "範囲が広すぎます（最大1000名まで）";
+                        return;
+                    }
 
-                const sub = subjects.find(s => s.id === activeId);
-                if (!sub) return;
-                
-                sub.start = start;
-                sub.end = end;
-                sub.students = Array.from({length: end - start + 1}, (_, i) => i + start);
-                sub.called = [];
-                sub.updatedAt = Date.now();
-                
-                initPlayView();
-                saveSubject(sub);
+                    const sub = subjects.find(s => s.id === activeId);
+                    if (!sub) {
+                        errorMsg.innerText = "データが見つかりません。一覧からやり直してください。";
+                        return;
+                    }
+                    
+                    sub.start = start;
+                    sub.end = end;
+                    sub.students = Array.from({length: end - start + 1}, (_, i) => i + start);
+                    sub.called = [];
+                    sub.updatedAt = Date.now();
+                    
+                    initPlayView();
+                    saveSubject(sub);
+                } catch(e) {
+                    alert("設定エラー: " + e.message);
+                }
             };
 
             function initPlayView() {
-                const sub = subjects.find(s => s.id === activeId);
-                document.getElementById('header-title').innerText = sub.name;
-                document.getElementById('display').innerText = sub.lastPicked || "？";
-                renderStudents();
-                updateUI();
-                showView('play');
+                try {
+                    const sub = subjects.find(s => s.id === activeId);
+                    document.getElementById('header-title').innerText = sub.name;
+                    document.getElementById('display').innerText = sub.lastPicked || "？";
+                    renderStudents();
+                    updateUI();
+                    showView('play');
+                } catch(e) {
+                    alert("画面表示エラー: " + e.message);
+                }
             }
 
             function renderStudents() {
                 const sub = subjects.find(s => s.id === activeId);
                 const grid = document.getElementById('student-grid');
                 grid.innerHTML = '';
-                sub.students.forEach(num => {
+                const studentsList = sub.students || [];
+                const calledList = sub.called || [];
+                studentsList.forEach(num => {
                     const div = document.createElement('div');
-                    const isCalled = sub.called.includes(num);
+                    const isCalled = calledList.includes(num);
                     div.className = `student-chip ${isCalled ? 'called' : ''}`;
                     div.innerText = num;
                     div.onclick = () => {
@@ -521,10 +554,12 @@
 
             function updateUI() {
                 const sub = subjects.find(s => s.id === activeId);
-                const remain = sub.students.length - sub.called.length;
+                const studentsList = sub.students || [];
+                const calledList = sub.called || [];
+                const remain = studentsList.length - calledList.length;
                 document.getElementById('label-remain').innerText = remain;
-                document.getElementById('label-progress').innerText = `${sub.called.length} / ${sub.students.length}`;
-                const percent = (sub.called.length / sub.students.length) * 100;
+                document.getElementById('label-progress').innerText = `${calledList.length} / ${studentsList.length}`;
+                const percent = studentsList.length > 0 ? (calledList.length / studentsList.length) * 100 : 0;
                 document.getElementById('progress-fill').style.width = percent + '%';
                 document.getElementById('btn-pick').disabled = (remain === 0);
                 document.getElementById('btn-pick').style.opacity = (remain === 0) ? "0.4" : "1";
@@ -566,9 +601,13 @@
             };
 
             document.getElementById('btn-to-list').onclick = () => {
-                document.getElementById('header-title').innerText = "🎓 指名くん";
-                renderSubjects();
-                showView('list');
+                try {
+                    document.getElementById('header-title').innerText = "🎓 指名くん";
+                    renderSubjects();
+                    showView('list');
+                } catch(e) {
+                    alert("一覧へ戻るエラー: " + e.message);
+                }
             };
 
             document.getElementById('btn-reset-subject').onclick = () => {
