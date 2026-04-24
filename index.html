@@ -115,11 +115,10 @@
 <body>
 
     <div id="loading">
-        <!-- IDを明記し、確実に取得できるようにしました -->
         <div id="loading-spinner" class="spinner"></div>
         <p id="loading-text" style="font-weight: bold; color: var(--text-muted);">接続を確認中...</p>
         <button id="btn-login-google" class="btn-accent" style="display:none; width: auto; padding: 15px 30px; font-size: 1.2rem;">Googleでログイン</button>
-        <p id="error-hint" style="display:none; color: var(--danger); font-size: 0.8rem; margin-top: 15px;"></p>
+        <p id="error-hint" style="display:none; color: var(--danger); font-size: 0.8rem; margin-top: 15px; padding: 0 20px; text-align: center;"></p>
     </div>
 
     <header>
@@ -178,7 +177,8 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, GoogleAuthProvider, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        // signInWithPopup に戻し、ブラウザの記憶を強制する setPersistence を追加
+        import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, collection, query, onSnapshot, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const firebaseConfig = {
@@ -194,24 +194,11 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
         const provider = new GoogleAuthProvider();
+        
+        // ログイン状態をブラウザに強く記憶させる
+        setPersistence(auth, browserLocalPersistence);
 
         let user = null, subjects = [], activeId = null, unsubscribe = null;
-        let isAuthenticating = true;
-
-        const elLoginBtn = document.getElementById('btn-login-google');
-        if(elLoginBtn) {
-            elLoginBtn.onclick = () => {
-                isAuthenticating = true;
-                signInWithRedirect(auth, provider);
-            };
-        }
-
-        const elLogoutBtn = document.getElementById('btn-logout');
-        if(elLogoutBtn) {
-            elLogoutBtn.onclick = () => { 
-                if(confirm("ログアウトしますか？")) signOut(auth).then(() => location.reload()); 
-            };
-        }
 
         // 安全に要素を隠す/表示するヘルパー関数
         function safeDisplay(id, displayStyle) {
@@ -224,32 +211,46 @@
             if (el) el.innerText = text;
         }
 
-        // ログイン状態の管理（エラー回避を徹底）
-        onAuthStateChanged(auth, async (u) => {
-            if (u) {
-                user = u;
-                isAuthenticating = false;
-                safeDisplay('loading', 'none');
-                startSync();
-            } else {
+        const elLoginBtn = document.getElementById('btn-login-google');
+        if(elLoginBtn) {
+            elLoginBtn.onclick = async () => {
                 try {
-                    const result = await getRedirectResult(auth);
-                    if (result && result.user) {
-                        // 成功時は再び onAuthStateChanged が発火するので何もしない
-                    } else {
-                        // 本当に未ログイン状態
-                        isAuthenticating = false;
-                        safeDisplay('loading-spinner', 'none');
-                        safeSetText('loading-text', 'ログインしてください');
-                        safeDisplay('btn-login-google', 'block');
-                    }
+                    safeDisplay('error-hint', 'none');
+                    safeSetText('loading-text', 'Googleの画面を開いています...');
+                    safeDisplay('loading-spinner', 'block');
+                    safeDisplay('btn-login-google', 'none');
+                    
+                    // ポップアップ方式でログインを実行
+                    await signInWithPopup(auth, provider);
+                    
                 } catch (e) {
                     console.error("Auth Error:", e);
                     safeDisplay('loading-spinner', 'none');
                     safeDisplay('error-hint', 'block');
-                    safeSetText('error-hint', `ログインエラーが発生しました。設定を確認してください。\n詳細: ${e.message}`);
+                    safeSetText('error-hint', `エラーが発生しました。\niPadのSafari設定で「ポップアップブロック」がオフになっているか確認してください。\n詳細: ${e.message}`);
+                    safeSetText('loading-text', 'ログインに失敗しました');
                     safeDisplay('btn-login-google', 'block');
                 }
+            };
+        }
+
+        const elLogoutBtn = document.getElementById('btn-logout');
+        if(elLogoutBtn) {
+            elLogoutBtn.onclick = () => { 
+                if(confirm("ログアウトしますか？")) signOut(auth).then(() => location.reload()); 
+            };
+        }
+
+        // ログイン状態の管理（ループしないシンプルな構造）
+        onAuthStateChanged(auth, (u) => {
+            if (u) {
+                user = u;
+                safeDisplay('loading', 'none');
+                startSync();
+            } else {
+                safeDisplay('loading-spinner', 'none');
+                safeSetText('loading-text', 'ログインしてください');
+                safeDisplay('btn-login-google', 'block');
             }
         });
 
