@@ -190,11 +190,14 @@
         <div id="view-config" class="view card" style="align-items: center; justify-content: center;">
             <h2 id="config-subject-name" style="font-size: 2.2rem; margin-bottom: 10px; color: var(--primary);">授業名</h2>
             <p class="text-muted" style="font-size: 1.2rem;">出席番号の範囲を設定してください</p>
-            <div style="display: flex; align-items: center; gap: 15px; margin: 50px 0;">
-                <input type="number" id="input-start" value="1" style="width: 140px; text-align: center; font-size: 2.5rem; font-weight: bold;">
+            <div style="display: flex; align-items: center; gap: 15px; margin: 40px 0 20px 0;">
+                <!-- 全角入力にも強いtype="tel"に変更 -->
+                <input type="tel" id="input-start" value="1" inputmode="numeric" pattern="[0-9]*" style="width: 140px; text-align: center; font-size: 2.5rem; font-weight: bold;">
                 <span style="font-size: 3rem; color: var(--border);">〜</span>
-                <input type="number" id="input-end" value="30" style="width: 140px; text-align: center; font-size: 2.5rem; font-weight: bold;">
+                <input type="tel" id="input-end" value="30" inputmode="numeric" pattern="[0-9]*" style="width: 140px; text-align: center; font-size: 2.5rem; font-weight: bold;">
             </div>
+            <!-- エラー表示用エリア -->
+            <p id="config-error-msg" style="color: var(--danger); font-weight: bold; height: 1.5rem; margin-bottom: 20px; font-size: 1.1rem;"></p>
             <button id="btn-config-done" class="btn-accent">この範囲で指名を開始！</button>
         </div>
 
@@ -259,7 +262,7 @@
         let syncStatus = "Firebaseの認証を待っています...";
         loadingText.innerText = syncStatus;
 
-        // タイムアウト設定：どこで止まっているか表示する
+        // タイムアウト設定
         setTimeout(() => {
             if (loadingDiv.style.display !== 'none') {
                 document.getElementById('loading-spinner').style.display = 'none';
@@ -272,7 +275,7 @@
             }
         }, 10000);
 
-        // スキップボタンで強制的に画面を開く
+        // スキップボタン
         forceOpenBtn.onclick = () => {
             loadingDiv.style.display = 'none';
             renderSubjects(); // ローカルデータで描画
@@ -284,7 +287,6 @@
             const db = getFirestore(app);
 
             let user = null;
-            // ローカルストレージからも読み込めるようにしておく
             let subjects = JSON.parse(localStorage.getItem('shimei_local_db')) || [];
             let activeId = null;
             let isSpinning = false;
@@ -347,9 +349,7 @@
                 }
             }
 
-            // 【重要】UIをブロックさせず、裏側でこっそり保存する関数
             function saveSubject(subject) {
-                // ローカルに即座にバックアップ（これで画面には即反映・絶対消えない）
                 const idx = subjects.findIndex(s => s.id === subject.id);
                 if (idx !== -1) subjects[idx] = subject; else subjects.push(subject);
                 localStorage.setItem('shimei_local_db', JSON.stringify(subjects));
@@ -360,7 +360,6 @@
                 indicator.style.display = 'inline-block';
                 indicator.innerText = "☁️ 保存中...";
                 
-                // awaitを使わず、裏で非同期に処理させる
                 setDoc(doc(getSubjectsRef(), subject.id), subject)
                     .then(() => {
                         indicator.innerText = "☁️ 保存完了";
@@ -388,12 +387,9 @@
                     div.onclick = (e) => {
                         if (e.target.classList.contains('delete-icon')) {
                             showConfirm("授業の削除", `「${sub.name}」を完全に削除しますか？`, () => {
-                                // 【UIを最優先で更新して画面から消す】
                                 subjects = subjects.filter(s => s.id !== sub.id);
                                 localStorage.setItem('shimei_local_db', JSON.stringify(subjects));
                                 renderSubjects(); 
-                                
-                                // そのあと裏でサーバーから削除
                                 if (user) deleteDoc(doc(getSubjectsRef(), sub.id)).catch(err => console.error(err));
                             });
                         } else {
@@ -417,14 +413,12 @@
                 const newSub = { id: newId, name, students: [], called: [], lastPicked: null, start: 1, end: 30, updatedAt: Date.now() };
                 subjects.push(newSub);
                 
-                // 【UIを最優先で更新して次の画面へ】
                 nameInput.value = '';
                 this.innerText = originalText;
                 this.disabled = false;
                 renderSubjects();
                 selectSubject(newId);
                 
-                // そのあと裏で保存
                 saveSubject(newSub);
             };
 
@@ -433,24 +427,54 @@
                 const sub = subjects.find(s => s.id === id);
                 if (sub.students.length === 0) {
                     document.getElementById('config-subject-name').innerText = sub.name;
+                    document.getElementById('config-error-msg').innerText = ""; // エラーを消す
                     showView('config');
                 } else {
                     initPlayView();
                 }
             }
 
+            // 【重要】全角文字の入力に対応・エラー表示の追加
             document.getElementById('btn-config-done').onclick = () => {
-                const start = parseInt(document.getElementById('input-start').value);
-                const end = parseInt(document.getElementById('input-end').value);
+                const errorMsg = document.getElementById('config-error-msg');
+                errorMsg.innerText = ""; // メッセージをリセット
+
+                // 全角数字を半角に変換し、数字以外を取り除く便利関数
+                const toHalfWidth = (str) => {
+                    return str.replace(/[０-９]/g, function(s) {
+                        return String.fromCharCode(s.charCodeAt(0) - 0xFEE0);
+                    }).replace(/[^0-9]/g, '');
+                };
+
+                const startStr = toHalfWidth(document.getElementById('input-start').value);
+                const endStr = toHalfWidth(document.getElementById('input-end').value);
+                
+                const start = parseInt(startStr);
+                const end = parseInt(endStr);
+                
+                // バリデーション（入力チェック）
+                if (isNaN(start) || isNaN(end)) {
+                    errorMsg.innerText = "正しい数字を入力してください";
+                    return;
+                }
+                if (start > end) {
+                    errorMsg.innerText = "開始番号は終了番号より小さくしてください";
+                    return;
+                }
+                if (end - start > 1000) {
+                    errorMsg.innerText = "範囲が広すぎます（最大1000名まで）";
+                    return;
+                }
+
                 const sub = subjects.find(s => s.id === activeId);
-                if (isNaN(start) || isNaN(end) || start > end) return;
+                if (!sub) return;
+                
                 sub.start = start;
                 sub.end = end;
                 sub.students = Array.from({length: end - start + 1}, (_, i) => i + start);
                 sub.called = [];
                 sub.updatedAt = Date.now();
                 
-                // 【UI最優先】
                 initPlayView();
                 saveSubject(sub);
             };
@@ -487,7 +511,6 @@
                         }
                         sub.updatedAt = Date.now();
                         
-                        // 【UI最優先】
                         renderStudents();
                         updateUI();
                         saveSubject(sub);
@@ -530,7 +553,6 @@
                         display.offsetHeight; 
                         display.style.animation = 'pop 0.6s ease-out forwards';
                         
-                        // 【UI最優先】
                         renderStudents();
                         updateUI();
                         saveSubject(sub);
@@ -556,7 +578,6 @@
                     sub.lastPicked = null;
                     sub.updatedAt = Date.now();
                     
-                    // 【UI最優先】
                     initPlayView();
                     saveSubject(sub);
                 });
